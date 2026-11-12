@@ -1,0 +1,137 @@
+<!--
+  ESPA-class servicer (decided 10 Nov 2026; SPEC_3 section 14): fits a standard ESPA port
+  envelope (61 x 71 x 97 cm, <= 181 kg) with the arm folded for launch. Same client,
+  gripper, thrusters and wheels as p3b_scene.xml; only the servicer body and arm change.
+
+  servicer: about 150 kg in total; bus 0.5 (x, towards the client) x 0.6 (y) x 0.9 (z) m,
+            140 kg. The arm folds flat (elbow fully closed, gripper pointing down) on the +x
+            face; the 0.71 m side of the envelope takes bus depth plus the folded arm.
+  arm:      6 revolute joints as p3b (shoulder yaw z, shoulder pitch y, elbow pitch y,
+            wrist pitch y, yaw z, roll x); shoulder on the +x face 0.25 m below centre
+            (room for the fold); upper arm 0.55 m, forearm 0.45 m, grip point 0.13 m beyond
+            the wrist: 1.18 m from the shoulder at full stretch.
+  robot description (read by robot_spec.py, so no controller code hard-codes this robot):
+            the <custom> numerics below give the stowed pose, a ready pose (IK seed: the
+            folded pose is singular), jaw positions, the pre-grasp
+            distance (bar centre to bus centre along the face normal) and the servicer's
+            bounding radius (stowed, for clearance).
+-->
+<mujoco model="p3e_espa">
+  <compiler angle="radian"/>
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast" cone="elliptic" impratio="10" noslip_iterations="20">
+    <flag contact="enable"/>
+  </option>
+  <mjorbit use_j2="false" use_drag="false" use_srp="false" use_magnetic="false"
+           use_gravity_gradient="false"/>
+
+  <custom>
+    <numeric name="servicer_stow" data="0 -1.5708 3.05 0.09 0 0"/>
+    <numeric name="servicer_ready" data="0 -0.8 1.2 -0.4 0 0"/>
+    <numeric name="grip_open" data="0.06 -0.06"/>
+    <numeric name="grip_squeeze" data="0.03"/>
+    <numeric name="pregrasp_d" data="1.25"/>  <!-- 1.35 left the bar at 96% of reach (shoulder 0.25 m low): 3.8 mm/s client push at close, 1.45 failed; 1.25 = 87%, 0.9 mm/s (12 Nov) -->
+    <numeric name="servicer_radius" data="0.62"/>
+  </custom>
+
+  <default>
+    <joint damping="2.0" armature="0.05"/>
+    <geom contype="0" conaffinity="0" rgba="0.8 0.82 0.86 1"/>
+    <default class="grip">
+      <geom contype="2" conaffinity="4" condim="4" friction="1.5 0.05 0.002"
+            solref="0.008 1" solimp="0.95 0.99 0.001" rgba="0.95 0.72 0.12 1"/>
+    </default>
+    <default class="client_col">
+      <geom contype="4" conaffinity="2" condim="4" friction="1.5 0.05 0.002"
+            solref="0.008 1" solimp="0.95 0.99 0.001"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <light pos="0 0 10" dir="0 0 -1"/>
+    <body name="chaser" pos="0 -2.15 0">
+      <freejoint name="chaser_joint"/>
+      <geom name="servicer_bus" type="box" size="0.25 0.30 0.45" mass="140" rgba="0.85 0.7 0.2 1"/>
+      <site name="bus_site" pos="0 0 0" size="0.02"/>
+      <body name="arm_base" pos="0.25 0 -0.25">
+        <joint name="j1_sh_yaw" type="hinge" axis="0 0 1" range="-2.8 2.8"/>
+        <geom type="cylinder" size="0.05 0.03" zaxis="1 0 0" pos="0.02 0 0" mass="1.5"/>
+        <body name="upper" pos="0.05 0 0">
+          <joint name="j2_sh_pitch" type="hinge" axis="0 1 0" range="-2.6 2.6"/>
+          <geom type="capsule" fromto="0 0 0 0.55 0 0" size="0.035" mass="3"/>
+          <body name="fore" pos="0.55 0 0">
+            <joint name="j3_elbow" type="hinge" axis="0 1 0" range="-3.05 3.05"/>
+            <geom type="capsule" fromto="0 0 0 0.45 0 0" size="0.03" mass="2.2"/>
+            <body name="wrist1" pos="0.45 0 0">
+              <joint name="j4_wr_pitch" type="hinge" axis="0 1 0" range="-2.6 2.6"/>
+              <geom type="sphere" size="0.04" mass="1"/>
+              <body name="wrist2">
+                <joint name="j5_wr_yaw" type="hinge" axis="0 0 1" range="-2.6 2.6"/>
+                <geom type="sphere" size="0.035" mass="0.5"/>
+                <body name="wrist3">
+                  <joint name="j6_wr_roll" type="hinge" axis="1 0 0" range="-3.1 3.1"/>
+                  <geom name="palm" class="grip" type="box" size="0.02 0.06 0.06" pos="0.05 0 0"
+                        mass="1.5" rgba="0.95 0.66 0.10 1"/>
+                  <site name="grip_site" pos="0.13 0 0" size="0.012" rgba="0.1 0.9 0.2 1"/>
+                  <body name="jaw_u" pos="0.13 0 0.033">
+                    <joint name="grip_u" type="slide" axis="0 0 1" range="-0.03 0.06" damping="5"/>
+                    <geom name="pad_u" class="grip" type="box" size="0.045 0.05 0.008"
+                          pos="0 0 0.008" mass="0.2"/>
+                  </body>
+                  <body name="jaw_l" pos="0.13 0 -0.033">
+                    <joint name="grip_l" type="slide" axis="0 0 1" range="-0.06 0.03" damping="5"/>
+                    <geom name="pad_l" class="grip" type="box" size="0.045 0.05 0.008"
+                          pos="0 0 -0.008" mass="0.2"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <body name="target" pos="0 0 0">
+      <freejoint name="target_joint"/>
+      <geom name="client_bus" class="client_col" type="box" size="0.75 0.5 0.5" mass="300"
+            rgba="0.75 0.78 0.82 1"/>
+      <geom name="handle_post_l" class="client_col" type="box" pos="-0.825 -0.14 0"
+            size="0.075 0.012 0.012" mass="0.5" rgba="0.3 0.3 0.3 1"/>
+      <geom name="handle_post_r" class="client_col" type="box" pos="-0.825 0.14 0"
+            size="0.075 0.012 0.012" mass="0.5" rgba="0.3 0.3 0.3 1"/>
+      <geom name="handle_bar" class="client_col" type="box" pos="-0.9 0 0" size="0.025 0.15 0.025"
+            mass="1.0" rgba="0.9 0.6 0.1 1"/>
+      <site name="bar_site" pos="-0.9 0 0" size="0.012" rgba="0.9 0.2 0.2 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="thrust_x" joint="chaser_joint" gear="1 0 0 0 0 0" ctrlrange="-0.75 0.75"/>
+    <motor name="thrust_y" joint="chaser_joint" gear="0 1 0 0 0 0" ctrlrange="-0.75 0.75"/>
+    <motor name="thrust_z" joint="chaser_joint" gear="0 0 1 0 0 0" ctrlrange="-0.75 0.75"/>
+    <motor name="rw_x" joint="chaser_joint" gear="0 0 0 1 0 0" ctrlrange="-3 3"/>
+    <motor name="rw_y" joint="chaser_joint" gear="0 0 0 0 1 0" ctrlrange="-3 3"/>
+    <motor name="rw_z" joint="chaser_joint" gear="0 0 0 0 0 1" ctrlrange="-3 3"/>
+    <motor name="tau1" joint="j1_sh_yaw" ctrlrange="-20 20"/>
+    <motor name="tau2" joint="j2_sh_pitch" ctrlrange="-20 20"/>
+    <motor name="tau3" joint="j3_elbow" ctrlrange="-15 15"/>
+    <motor name="tau4" joint="j4_wr_pitch" ctrlrange="-5 5"/>
+    <motor name="tau5" joint="j5_wr_yaw" ctrlrange="-5 5"/>
+    <motor name="tau6" joint="j6_wr_roll" ctrlrange="-5 5"/>
+    <position name="grip_u_pos" joint="grip_u" kp="400" kv="20" forcerange="-30 30"
+              ctrlrange="-0.06 0.06"/>
+    <position name="grip_l_pos" joint="grip_l" kp="400" kv="20" forcerange="-30 30"
+              ctrlrange="-0.06 0.06"/>
+    <motor name="test_c_fx" joint="target_joint" gear="1 0 0 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_c_fy" joint="target_joint" gear="0 1 0 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_c_fz" joint="target_joint" gear="0 0 1 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_c_tx" joint="target_joint" gear="0 0 0 1 0 0" ctrlrange="-100 100"/>
+    <motor name="test_c_ty" joint="target_joint" gear="0 0 0 0 1 0" ctrlrange="-100 100"/>
+    <motor name="test_c_tz" joint="target_joint" gear="0 0 0 0 0 1" ctrlrange="-100 100"/>
+    <motor name="test_s_fx" joint="chaser_joint" gear="1 0 0 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_s_fy" joint="chaser_joint" gear="0 1 0 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_s_fz" joint="chaser_joint" gear="0 0 1 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_s_tx" joint="chaser_joint" gear="0 0 0 1 0 0" ctrlrange="-100 100"/>
+    <motor name="test_s_ty" joint="chaser_joint" gear="0 0 0 0 1 0" ctrlrange="-100 100"/>
+    <motor name="test_s_tz" joint="chaser_joint" gear="0 0 0 0 0 1" ctrlrange="-100 100"/>
+  </actuator>
+</mujoco>

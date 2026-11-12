@@ -1,0 +1,59 @@
+# mjorbit-exp: code, specs and docs only. No generated data, models, logs or third-party code.
+
+# --- third-party ---
+# the mjorbit simulator is its own git repo (github.com/johnzhang3/mjorbit); clone it into simulator/
+simulator/
+# the mjorbit paper (third-party PDF)
+mjorbit_paper.pdf
+
+# --- scratch and generated outputs ---
+tmp/
+output/
+**/sheets/
+**/replay/
+
+# --- experiment results and logs (all generated) ---
+projects/**/*.json
+projects/**/*.jsonl
+projects/**/*.log
+projects/**/*.txt
+projects/**/logs/
+**/events.out.tfevents.*
+
+# --- datasets, rollouts, model weights ---
+*.npz
+*.npy
+*.pt
+*.pth
+*.ckpt
+*.zip
+*.tar
+*.h5
+*.hdf5
+*.parquet
+*.mp4
+*.gif
+*.png
+*.jpg
+*.pdf
+
+# --- generated scenes ---
+# temporary case files written by the mjorbit compiler for each episode
+**/.case_*.xml
+# made by projects/p4_vision/make_scene.py from the ESPA scene
+projects/p3_capture/p4_espa_cam_scene.xml
+
+# --- Python / tooling ---
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.pixi/
+.venv/
+venv/
+.env
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

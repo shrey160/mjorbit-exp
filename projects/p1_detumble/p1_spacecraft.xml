@@ -1,0 +1,45 @@
+<mujoco model="p1_detumble_box">
+  <!--
+    Project 1 test spacecraft: one rigid 10 kg box, 0.5 x 0.3 x 0.2 m, no arm,
+    no contact. Three ideal body-frame torques are applied as `motor` actuators
+    on the free joint's rotational DOFs (free-joint angular DOFs are in the body
+    frame in MuJoCo). ctrlrange is the per-axis torque limit in N*m.
+
+    Box inertia (uniform density): I = m/12 * (b^2 + c^2), etc.
+      Ixx = 10/12 * (0.3^2 + 0.2^2) = 0.1083 kg*m^2
+      Iyy = 10/12 * (0.5^2 + 0.2^2) = 0.2417 kg*m^2
+      Izz = 10/12 * (0.5^2 + 0.3^2) = 0.2833 kg*m^2
+    Unequal inertias are deliberate: they make the spin couple between axes.
+
+    Orbit environment: J2, drag, SRP and magnetic models off. Two-body reference
+    orbit, differential gravity and gravity-gradient torque stay on (defaults).
+    Units: m, kg, s.
+  -->
+  <compiler angle="radian"/>
+  <option timestep="0.01" gravity="0 0 0" integrator="implicitfast">
+    <flag contact="disable"/>
+  </option>
+
+  <worldbody>
+    <body name="sc" pos="0 0 0">
+      <freejoint name="base"/>
+      <geom name="hull" type="box" size="0.25 0.15 0.10" mass="10"
+            rgba="0.85 0.75 0.45 1" contype="0" conaffinity="0"/>
+      <!-- Axis markers (massless visuals): red +x, green +y, blue +z. -->
+      <geom type="capsule" fromto="0.25 0 0 0.40 0 0" size="0.01" mass="0"
+            rgba="1 0.2 0.2 1" contype="0" conaffinity="0"/>
+      <geom type="capsule" fromto="0 0.15 0 0 0.30 0" size="0.01" mass="0"
+            rgba="0.2 1 0.2 1" contype="0" conaffinity="0"/>
+      <geom type="capsule" fromto="0 0 0.10 0 0 0.25" size="0.01" mass="0"
+            rgba="0.2 0.4 1 1" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="tau_x" joint="base" gear="0 0 0 1 0 0" ctrlrange="-0.01 0.01" ctrllimited="true"/>
+    <motor name="tau_y" joint="base" gear="0 0 0 0 1 0" ctrlrange="-0.01 0.01" ctrllimited="true"/>
+    <motor name="tau_z" joint="base" gear="0 0 0 0 0 1" ctrlrange="-0.01 0.01" ctrllimited="true"/>
+  </actuator>
+
+  <mjorbit use_j2="false" use_drag="false" use_srp="false" use_magnetic="false"/>
+</mujoco>

@@ -1,0 +1,135 @@
+<!--
+  Project 3B: grasp the client's grapple bar with a servicer arm (SPEC_3 section 5).
+
+  servicer: 150 kg in total; a 1 m cube bus (136 kg) with an arm on its +x face (the face
+            towards the client). Bus actuators are ideal motors on the free joint:
+            3 world-frame thruster forces (0.75 N = 5 mm/s^2) and 3 body-frame
+            reaction-wheel torques (1 N m), as in the upstream astrobee_grasp example.
+  arm:      6 revolute joints: shoulder yaw (z), shoulder pitch (y), elbow pitch (y),
+            spherical wrist pitch (y), yaw (z), roll (x). Upper arm 0.70 m, forearm 0.55 m,
+            grip point 0.13 m beyond the wrist: 1.93 m reach from the bus centre at full
+            stretch. Torque motors (Cartesian impedance via J^T in the controller).
+  gripper:  parallel jaw, two flat pads on opposed slide joints closing along the gripper
+            z axis onto the bar (approach = gripper x, bar = gripper y), position-servoed.
+  client:   the rectangular satellite of 3A: 300 kg, 1.5 x 1.0 x 1.0 m bus, grapple bar
+            (0.30 m, 2.5 cm radius) along body y on the -x face, 0.15 m off the face.
+            Independent free body: nothing connects it to the servicer (no weld).
+  Friction: elliptic cones, impratio 10 (MuJoCo's default pyramidal cones let a loaded grip
+            creep at a few N regardless of clamp force; SPEC_3 section 6). The old setting
+            is kept in p3b_scene_pyramidal.xml.
+  Collisions: gripper pads and palm (2/4) vs the client's bar, posts and bus (4/2) only.
+  World = chief-centred local inertial frame (mjorbit); MuJoCo gravity off.
+-->
+<mujoco model="p3b_grasp">
+  <compiler angle="radian"/>
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast" cone="elliptic" impratio="10" noslip_iterations="20">
+    <flag contact="enable"/>
+  </option>
+  <mjorbit use_j2="false" use_drag="false" use_srp="false" use_magnetic="false"
+           use_gravity_gradient="false"/>
+
+  <default>
+    <joint damping="2.0" armature="0.05"/>
+    <geom contype="0" conaffinity="0" rgba="0.8 0.82 0.86 1"/>
+    <default class="grip">
+      <geom contype="2" conaffinity="4" condim="4" friction="1.5 0.05 0.002"
+            solref="0.008 1" solimp="0.95 0.99 0.001" rgba="0.95 0.72 0.12 1"/>
+    </default>
+    <default class="client_col">
+      <geom contype="4" conaffinity="2" condim="4" friction="1.5 0.05 0.002"
+            solref="0.008 1" solimp="0.95 0.99 0.001"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <light pos="0 0 10" dir="0 0 -1"/>
+    <body name="chaser" pos="0 -2.7 0">
+      <freejoint name="chaser_joint"/>
+      <geom name="servicer_bus" type="box" size="0.5 0.5 0.5" mass="136" rgba="0.85 0.7 0.2 1"/>
+      <site name="bus_site" pos="0 0 0" size="0.02"/>
+      <body name="arm_base" pos="0.5 0 0">
+        <joint name="j1_sh_yaw" type="hinge" axis="0 0 1" range="-2.8 2.8"/>
+        <geom type="cylinder" size="0.06 0.04" zaxis="1 0 0" pos="0.02 0 0" mass="2"/>
+        <body name="upper" pos="0.05 0 0">
+          <joint name="j2_sh_pitch" type="hinge" axis="0 1 0" range="-2.6 2.6"/>
+          <geom type="capsule" fromto="0 0 0 0.70 0 0" size="0.04" mass="4"/>
+          <body name="fore" pos="0.70 0 0">
+            <joint name="j3_elbow" type="hinge" axis="0 1 0" range="-2.9 2.9"/>
+            <geom type="capsule" fromto="0 0 0 0.55 0 0" size="0.035" mass="3"/>
+            <body name="wrist1" pos="0.55 0 0">
+              <joint name="j4_wr_pitch" type="hinge" axis="0 1 0" range="-2.6 2.6"/>
+              <geom type="sphere" size="0.04" mass="1"/>
+              <body name="wrist2">
+                <joint name="j5_wr_yaw" type="hinge" axis="0 0 1" range="-2.6 2.6"/>
+                <geom type="sphere" size="0.035" mass="0.5"/>
+                <body name="wrist3">
+                  <joint name="j6_wr_roll" type="hinge" axis="1 0 0" range="-3.1 3.1"/>
+                  <geom name="palm" class="grip" type="box" size="0.02 0.06 0.06" pos="0.05 0 0"
+                        mass="1.5" rgba="0.95 0.66 0.10 1"/>
+                  <site name="grip_site" pos="0.13 0 0" size="0.012" rgba="0.1 0.9 0.2 1"/>
+                  <body name="jaw_u" pos="0.13 0 0.033">
+                    <joint name="grip_u" type="slide" axis="0 0 1" range="-0.03 0.06" damping="5"/>
+                    <geom name="pad_u" class="grip" type="box" size="0.045 0.05 0.008"
+                          pos="0 0 0.008" mass="0.2"/>
+                  </body>
+                  <body name="jaw_l" pos="0.13 0 -0.033">
+                    <joint name="grip_l" type="slide" axis="0 0 1" range="-0.06 0.03" damping="5"/>
+                    <geom name="pad_l" class="grip" type="box" size="0.045 0.05 0.008"
+                          pos="0 0 -0.008" mass="0.2"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <body name="target" pos="0 0 0">
+      <freejoint name="target_joint"/>
+      <geom name="client_bus" class="client_col" type="box" size="0.75 0.5 0.5" mass="300"
+            rgba="0.75 0.78 0.82 1"/>
+      <geom name="handle_post_l" class="client_col" type="box" pos="-0.825 -0.14 0"
+            size="0.075 0.012 0.012" mass="0.5" rgba="0.3 0.3 0.3 1"/>
+      <geom name="handle_post_r" class="client_col" type="box" pos="-0.825 0.14 0"
+            size="0.075 0.012 0.012" mass="0.5" rgba="0.3 0.3 0.3 1"/>
+      <geom name="handle_bar" class="client_col" type="capsule" fromto="-0.9 -0.15 0 -0.9 0.15 0"
+            size="0.025" mass="1.0" rgba="0.9 0.6 0.1 1"/>
+      <site name="bar_site" pos="-0.9 0 0" size="0.012" rgba="0.9 0.2 0.2 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="thrust_x" joint="chaser_joint" gear="1 0 0 0 0 0" ctrlrange="-0.75 0.75"/>
+    <motor name="thrust_y" joint="chaser_joint" gear="0 1 0 0 0 0" ctrlrange="-0.75 0.75"/>
+    <motor name="thrust_z" joint="chaser_joint" gear="0 0 1 0 0 0" ctrlrange="-0.75 0.75"/>
+    <motor name="rw_x" joint="chaser_joint" gear="0 0 0 1 0 0" ctrlrange="-1 1"/>
+    <motor name="rw_y" joint="chaser_joint" gear="0 0 0 0 1 0" ctrlrange="-1 1"/>
+    <motor name="rw_z" joint="chaser_joint" gear="0 0 0 0 0 1" ctrlrange="-1 1"/>
+    <motor name="tau1" joint="j1_sh_yaw" ctrlrange="-20 20"/>
+    <motor name="tau2" joint="j2_sh_pitch" ctrlrange="-20 20"/>
+    <motor name="tau3" joint="j3_elbow" ctrlrange="-15 15"/>
+    <motor name="tau4" joint="j4_wr_pitch" ctrlrange="-5 5"/>
+    <motor name="tau5" joint="j5_wr_yaw" ctrlrange="-5 5"/>
+    <motor name="tau6" joint="j6_wr_roll" ctrlrange="-5 5"/>
+    <position name="grip_u_pos" joint="grip_u" kp="400" kv="20" forcerange="-30 30"
+              ctrlrange="-0.06 0.06"/>
+    <position name="grip_l_pos" joint="grip_l" kp="400" kv="20" forcerange="-30 30"
+              ctrlrange="-0.06 0.06"/>
+    <!-- Load-test rig (SPEC_3 section 6), zero in normal runs: equal and opposite
+         wrenches on client and servicer (translational gear = world frame, rotational
+         gear = body frame on a free joint). -->
+    <motor name="test_c_fx" joint="target_joint" gear="1 0 0 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_c_fy" joint="target_joint" gear="0 1 0 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_c_fz" joint="target_joint" gear="0 0 1 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_c_tx" joint="target_joint" gear="0 0 0 1 0 0" ctrlrange="-100 100"/>
+    <motor name="test_c_ty" joint="target_joint" gear="0 0 0 0 1 0" ctrlrange="-100 100"/>
+    <motor name="test_c_tz" joint="target_joint" gear="0 0 0 0 0 1" ctrlrange="-100 100"/>
+    <motor name="test_s_fx" joint="chaser_joint" gear="1 0 0 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_s_fy" joint="chaser_joint" gear="0 1 0 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_s_fz" joint="chaser_joint" gear="0 0 1 0 0 0" ctrlrange="-100 100"/>
+    <motor name="test_s_tx" joint="chaser_joint" gear="0 0 0 1 0 0" ctrlrange="-100 100"/>
+    <motor name="test_s_ty" joint="chaser_joint" gear="0 0 0 0 1 0" ctrlrange="-100 100"/>
+    <motor name="test_s_tz" joint="chaser_joint" gear="0 0 0 0 0 1" ctrlrange="-100 100"/>
+  </actuator>
+</mujoco>

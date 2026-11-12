@@ -1,0 +1,47 @@
+<!--
+  Project 3A: approach a Starlink-like client to a pre-grasp point (SPEC_3 section 2).
+
+  servicer: 150 kg, 1 m cube, three ideal thrusters on its free joint's translational DOFs
+            (world-frame forces, attitude assumed held by its own attitude control, as in
+            Project 2). 0.75 N per axis = 5 mm/s^2, the Project 2 authority.
+  client:   a generic rectangular satellite with a prepared grasp fixture (user choice,
+            8 Nov; replaces the Starlink-like bus): 300 kg, 1.5 x 1.0 x 1.0 m bus (long
+            axis = body x) and a grapple bar on the -x face: a 0.30 m bar, 5 x 5 cm square section,
+            along body y, standing 0.15 m off the face on two posts (a handrail-type
+            handle for a two-finger gripper). Capture feature = bar centre (-0.9, 0, 0).
+            Uncontrolled free body starting at the chief; attitude motion set at reset.
+  Contact disabled: entering the inflated client box ends an episode (clearance check).
+-->
+<mujoco model="p3a_capture_approach">
+  <compiler angle="radian"/>
+  <option timestep="1.0" gravity="0 0 0" integrator="implicitfast">
+    <flag contact="disable"/>
+  </option>
+  <mjorbit use_j2="false" use_drag="false" use_srp="false" use_magnetic="false"
+           use_gravity_gradient="false"/>
+
+  <worldbody>
+    <light pos="0 0 10" dir="0 0 -1"/>
+    <body name="chaser" pos="0 -20 0">
+      <freejoint name="chaser_joint"/>
+      <geom name="servicer_box" type="box" size="0.5 0.5 0.5" mass="150" rgba="0.85 0.7 0.2 1"/>
+    </body>
+    <body name="target" pos="0 0 0">
+      <freejoint name="target_joint"/>
+      <geom name="client_bus" type="box" size="0.75 0.5 0.5" mass="300" rgba="0.75 0.78 0.82 1"/>
+      <geom name="handle_post_l" type="box" pos="-0.825 -0.14 0" size="0.075 0.012 0.012"
+            mass="0.5" rgba="0.3 0.3 0.3 1"/>
+      <geom name="handle_post_r" type="box" pos="-0.825 0.14 0" size="0.075 0.012 0.012"
+            mass="0.5" rgba="0.3 0.3 0.3 1"/>
+      <geom name="handle_bar" type="box" pos="-0.9 0 0" size="0.025 0.15 0.025"
+            mass="1.0" rgba="0.9 0.6 0.1 1"/>
+      <site name="capture_feature" pos="-0.9 0 0" size="0.04" rgba="0.9 0.2 0.2 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="thrust_x" joint="chaser_joint" gear="1 0 0 0 0 0" ctrlrange="-0.75 0.75"/>
+    <motor name="thrust_y" joint="chaser_joint" gear="0 1 0 0 0 0" ctrlrange="-0.75 0.75"/>
+    <motor name="thrust_z" joint="chaser_joint" gear="0 0 1 0 0 0" ctrlrange="-0.75 0.75"/>
+  </actuator>
+</mujoco>
