@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from multiprocessing import Pool
@@ -46,7 +47,9 @@ import mujoco  # noqa: E402
 from cams import CamRig  # noqa: E402
 from grasp_sim import ARM_Q, GRIP_Q, GraspCfg, GraspSim  # noqa: E402
 
-SCENE = "p4_espa_cam_scene.xml"
+# camera scene; P4_SCENE=p4_espa_arm2_cam_scene.xml selects the realistic arm (13 Nov).
+# eval_est.py and export_p4_replay.py import SCENE from here, so they follow it.
+SCENE = os.environ.get("P4_SCENE", "p4_espa_cam_scene.xml")
 SPLITS = {"demo": 8000, "validation": 6000, "test": 7000}
 PHASES = ("settle", "reach", "approach", "close", "hold")
 

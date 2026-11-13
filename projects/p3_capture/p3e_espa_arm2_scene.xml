@@ -27,6 +27,7 @@
             variant can raise these). Joint speed limit 10 deg/s (CAESAR, e.Deorbit) is not
             physics: runs record the peak joint speed and flag anything above it.
   Gripper visuals (13 Nov): drive, rails, fingers, F/T ring and wrist camera are class vis
+            (fingers metal grey, not bar orange: the cameras must not confuse them, 13 Nov)
             (no mass, no contact); pad and palm geometry, mass and friction are unchanged.
   Not modelled (Level 3): joint stiffness (ROKVISS: about 4900 N m/rad), wrist offsets.
   Base description, from p3e_espa_scene.xml: ESPA-class servicer (decided 10 Nov 2026; SPEC_3 section 14): fits a standard ESPA port
@@ -134,16 +135,16 @@
                     <geom name="pad_u" class="grip" type="box" size="0.045 0.05 0.008"
                           pos="0 0 0.008" mass="0.2" rgba="0.12 0.12 0.13 1"/>
                     <!-- visual only: finger (backing plate on the pad, carriage riding the rails) -->
-                    <geom class="vis" type="box" size="0.045 0.05 0.003" pos="0 0 0.019" rgba="0.95 0.66 0.10 1"/>
-                    <geom class="vis" type="box" size="0.011 0.048 0.016" pos="-0.054 0 0.010" rgba="0.95 0.66 0.10 1"/>
+                    <geom class="vis" type="box" size="0.045 0.05 0.003" pos="0 0 0.019" rgba="0.62 0.64 0.68 1"/>
+                    <geom class="vis" type="box" size="0.011 0.048 0.016" pos="-0.054 0 0.010" rgba="0.62 0.64 0.68 1"/>
                   </body>
                   <body name="jaw_l" pos="0.13 0 -0.033">
                     <joint name="grip_l" type="slide" axis="0 0 1" range="-0.06 0.03" damping="5"/>
                     <geom name="pad_l" class="grip" type="box" size="0.045 0.05 0.008"
                           pos="0 0 -0.008" mass="0.2" rgba="0.12 0.12 0.13 1"/>
                     <!-- visual only: finger (backing plate on the pad, carriage riding the rails) -->
-                    <geom class="vis" type="box" size="0.045 0.05 0.003" pos="0 0 -0.019" rgba="0.95 0.66 0.10 1"/>
-                    <geom class="vis" type="box" size="0.011 0.048 0.016" pos="-0.054 0 -0.010" rgba="0.95 0.66 0.10 1"/>
+                    <geom class="vis" type="box" size="0.045 0.05 0.003" pos="0 0 -0.019" rgba="0.62 0.64 0.68 1"/>
+                    <geom class="vis" type="box" size="0.011 0.048 0.016" pos="-0.054 0 -0.010" rgba="0.62 0.64 0.68 1"/>
                   </body>
                 </body>
               </body>

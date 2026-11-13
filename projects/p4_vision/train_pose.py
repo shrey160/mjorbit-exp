@@ -118,6 +118,8 @@ def main():
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--max-steps", type=int, default=0, help="stop after this many steps (smoke test)")
     ap.add_argument("--augment", type=int, default=1, help="photometric augmentation (1) or none (0)")
+    ap.add_argument("--init", default="", help="fine-tune: start from these weights (keeps their "
+                    "position normalisation) and score them as epoch 0 (13 Nov, arm2 from v2)")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -133,9 +135,13 @@ def main():
                                     pin_memory=True, persistent_workers=True, prefetch_factor=4)
     dl_tr, dl_va = mk(tr, True), mk(va[::2], False)
     net = PoseNet().to(dev)
-    P = np.asarray(priv[tr][:, 0:3])
-    net.p_mu[:] = torch.tensor(P.mean(0), dtype=torch.float32)
-    net.p_sd[:] = torch.tensor(P.std(0), dtype=torch.float32)
+    if a.init:
+        net.load_state_dict(torch.load(a.init, map_location=dev))
+        print(f"fine-tuning from {a.init} (position normalisation kept)", flush=True)
+    else:
+        P = np.asarray(priv[tr][:, 0:3])
+        net.p_mu[:] = torch.tensor(P.mean(0), dtype=torch.float32)
+        net.p_sd[:] = torch.tensor(P.std(0), dtype=torch.float32)
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=1e-4)
     steps = a.epochs * len(dl_tr) if not a.max_steps else a.max_steps
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=steps, pct_start=0.05)
@@ -152,6 +158,15 @@ def main():
         scaler.load_state_dict(S["scaler"])
         best, step, log, e0 = S["best"], S["step"], S["log"], S["epoch"]
         print(f"resumed after epoch {e0}, step {step}", flush=True)
+    elif a.init:  # how the starting weights do on the new data, before any training
+        rep = evaluate(net, dl_va, dev)
+        rep.update(epoch=0, train_loss=None, min=0.0)
+        log.append(rep)
+        best = rep["approach"]["pos_mm_med"] + rep["all"]["pos_mm_med"] if "approach" in rep else rep["all"]["pos_mm_med"]
+        torch.save(net.state_dict(), out / "best.pt")
+        print("epoch 0 (initial weights): " + "; ".join(f"{k} {v['pos_mm_med']:.1f}/{v['pos_mm_p95']:.1f} mm "
+                                                       f"{v['rot_deg_med']:.2f}/{v['rot_deg_p95']:.2f} deg"
+                                                       for k, v in rep.items() if isinstance(v, dict)) + " *", flush=True)
     for e in range(e0, a.epochs):
         dl_tr.sampler.rng = np.random.default_rng(e)  # same batches whether resumed or not
         run = 0.0

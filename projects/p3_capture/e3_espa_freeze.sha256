@@ -1,6 +1,6 @@
 # ESPA E3 freeze v1 2026-11-12: robot_spec wiring (p3b bit-identical, 20/20), inertia-scaled bus gains, ESPA pregrasp_d 1.25; set after the ESPA tune split (no tuning changes). p3b v2 in e3_freeze.sha256
 # v1.1 2026-11-12: grasp_sim.py adds step_hook (None = no-op; p3b 20/20 identical after it); grasp_sim.py was edited at 11:21 while the validation stage B (started 11:08) ran; the test ran on v1.1. The hook is a no-op either way. v1 kept in e3_espa_freeze_v1.sha256
-# v1.2 2026-11-13: grasp_sim.py adds the P4.3 pose_est hook (None = truth; p3b 20/20 identical after it). Adds p3e_espa_arm2_scene.xml (realistic arm, SPEC_3 14.4), on which the 25-mission arm2 E3 ran. v1.1 kept in e3_espa_freeze_v1_1.sha256
+# v1.2 2026-11-13: grasp_sim.py adds the P4.3 pose_est hook (None = truth; p3b 20/20 identical after it). Adds p3e_espa_arm2_scene.xml (realistic arm, SPEC_3 14.4), on which the 25-mission arm2 E3 ran. v1.1 kept in e3_espa_freeze_v1_1.sha256. Same day, later: finger visuals recoloured (rgba only, no physics change); hash updated
 af125a372941bc4ea94a2364c7073aa7ffb1c5c7a936ea6b862d43d6ea979c7d *capture_env.py
 78874195ae09e38a428ddd4dc7e01fd7526c3c5216fe26c8eae285a4954a7e56 *capture_guidance.py
 79a35e0676237c84849ae151d3462deb31f0d41257f514e3df469fe3a223e5bb *check_espa.py
@@ -36,4 +36,4 @@ a3342cffa12b559189747210c325f9930acb225cba5d9d8378cc30945b81e013 *p3a_scene.xml
 3553921c795eeb737e2beb31f7e827f88c4f43c14004572a4a144cdf6a4090d1 *p3b_scene_pyramidal.xml
 e8608cde7b6a3c69a08d4f361da0f2e1a6e433c3922f392d153872590d6a0d4e *p3b_scene_round.xml
 912d4bfded6a3e5431d39599926e5d2711596ac5d4bc246edcfee2bc60681ac4 *p3e_espa_scene.xml
-29abc88bc43336472bd39ed1a43d7db9a44cdd68a8ac27ca59cf6f810a43ceaa *p3e_espa_arm2_scene.xml
+bc6adf4d91dde8711e676c8c3a1faed08572f8780eec553297fa171f08b55bab *p3e_espa_arm2_scene.xml

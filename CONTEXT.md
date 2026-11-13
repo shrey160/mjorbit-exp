@@ -6,6 +6,27 @@ This file records the user's goals, work completed, verified setup, and lessons 
 
 ## Resume here (next session)
 
+**13 Nov, session closed here. Start with this block.**
+- **v3 fine-tune done on Colab** (T4, 3.1 min; train 20,570 frames from episodes 0–109, val 1,403 frames from 110–124). Validation median / p95 position error:
+
+  | | all | settle | reach | approach | close |
+  |---|---|---|---|---|---|
+  | epoch 0 = v2 weights on arm2 images | 3.5 / 21.1 mm | 0.6 / 1.4 | 2.0 / **33.1** | 3.8 / 7.1 | 3.9 / 7.5 |
+  | **epoch 3 (best, `pose_v3/best.pt`)** | **1.6 / 3.5 mm** | 1.8 / 3.4 | 1.6 / 3.7 | **1.4 / 3.6** | 1.7 / 2.9 |
+  | epoch 10 | 1.6 / 3.4 mm | 1.6 / 3.6 | 1.6 / 3.5 | 1.6 / 3.6 | 1.7 / 3.1 |
+
+  Rotation about 0.2° median. The v2 network was already usable on the new arm (median fine), but its reach-phase tail was large (p95 33 mm, the moving arm housings in view); 1 epoch of fine-tuning fixed it, flat after epoch 3. Better than v2 on its own data (2.2 / 6.1 mm).
+- **Estimate grasp on arm2 done (13 Nov, 25 validation seeds, 2.5 min; `p43_val_oracle_arm2.json`, `p43_val_est_arm2v3.json`, log `p43_eval_arm2v3.log`):** oracle 25/25, max push 0.61 mm/s, bar shift 1.81 mm; **v3 estimate 25/25** (CI 87–100%), 0 collisions, 0 aborts, 0 over the push limit, max push 0.97 mm/s, bar shift 1.81 mm. Estimate error medians: settle 3.4, reach 2.5, approach 2.7 mm; at close 2.2 median / 4.4 p95 / 6.2 max mm (old arm with v2: 2.1 / 5.3 / 7.0). Weights: `colob_ops/best_v3.pt` = `/home/shrey31/p4_data/pose_v3/best.pt`. `run_p43_eval.sh` now takes `ORACLE=<file>` (default the old-arm file); command: `P4_SCENE=p4_espa_arm2_cam_scene.xml ORACLE=p43_val_oracle_arm2.json bash run_p43_eval.sh <ckpt> arm2v3 25`.
+- **Next (in order):**
+  3. Commit the uncommitted camera-scene / v3 work (make_scene `--arm`, gen_demos `P4_SCENE`, check_cam_physics scene arg, train_pose `--init`, colab_p43_v3.ipynb, make_colab_upload_v3.sh, run_arm2_cam_smoke.sh, arm2 finger recolour + freeze hash, CONTEXT). `p3_capture/p4_espa_arm2_cam_scene.xml` is generated: add it to the "generated scenes" section of `.gitignore` instead of committing it.
+  4. Then P4.4 (LeRobot conversion, ACT) on demos_v3 (record more episodes if ACT needs them).
+
+**13 Nov, latest before that: v3 data and fine-tune on the realistic arm.**
+- Camera scene: `make_scene.py --arm arm2` → `p4_espa_arm2_cam_scene.xml`; `P4_SCENE=p4_espa_arm2_cam_scene.xml` switches gen_demos / eval_est / export_p4_replay to it. Smoke (`run_arm2_cam_smoke.sh`): 4/4, physics identical to the plain arm2 scene, sheets in `p4_vision/sheets/arm2_*.png`. Finger visuals recoloured grey (not bar orange).
+- `demos_v3`: 125/125 episodes succeeded, 58,431 frames, 1.9 GB, 5.9 min on 8 workers, `/home/shrey31/p4_data/demos_v3`. Shards (5 × 25 episodes) in `tmp/colab_upload_v3/data_v3/`; **waiting for the user to upload them to Drive `data_v3/` and run the notebook.** The Drive connector cannot see Colab-made files, so whether `pose_v2/best.pt` is on Drive is unchecked; if missing, upload `colob_ops/best_v2_1.pt` there as `best.pt`.
+- `train_pose.py --init <weights>` fine-tunes (keeps the position normalisation, scores the start weights as epoch 0).
+- Colab: `colab_p43_v3.ipynb`; Drive `mjorbit_p4/code_v3/` (filled by Claude) and empty `data_v3/` (user uploads the shards from `tmp/colab_upload_v3/data_v3/`, made by `make_colab_upload_v3.sh`). Starts from Drive `pose_v2/best.pt`, 10 epochs, lr 3e-4, episodes 0–109 train; results to `pose_v3/`.
+
 **13 Nov, later: P4.3 wrapped up.** Write-ups in SPEC_4 §4.3, SPEC_3 §14.4 (arm2) and LEARNINGS; freeze v1.2 (`e3_espa_freeze.sha256`, all 36 hashes OK; v1.1 kept); Vision Grasp Replay re-exported with the epoch-23 network (`run_p4_replay.sh`; close errors 1.5 and 2.2 mm) and republished. Everything committed on branch `p4.3-and-arm2` (commit 0245e5b), pushed, and fast-forward merged into `main` (13 Nov). **Next:** arm2 camera scene, small `demos_v3`, retrain on Colab, re-check the estimate grasp (about 25 missions); then P4.4 (LeRobot, ACT).
 
 **13 Nov, earlier (stopped here first). Start with this block.**

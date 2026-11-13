@@ -1,7 +1,7 @@
 """Check (SPEC_4 P4.0): the camera scene plus recorder gives the same physics as the plain
 ESPA scene. Re-runs the episodes of a demo directory on p3e_espa_scene.xml without any hook
 and compares outcome metrics with the recorded episodes.jsonl exactly.
-python check_cam_physics.py <demo_dir>"""
+python check_cam_physics.py <demo_dir> [plain_scene]   (arm2: p3e_espa_arm2_scene.xml)"""
 import json
 import sys
 from pathlib import Path
@@ -13,7 +13,7 @@ from grasp_sim import GraspCfg, GraspSim  # noqa: E402
 
 KEYS = ("success", "outcome", "push_dv", "bar_shift_mm", "t_grasp", "collision")
 ms = [json.loads(ln) for ln in (Path(sys.argv[1]) / "episodes.jsonl").read_text().splitlines() if ln.strip()]
-sim = GraspSim(GraspCfg(scene="p3e_espa_scene.xml", hold_s=5.0, mon=True, mon_act=True))
+sim = GraspSim(GraspCfg(scene=sys.argv[2] if len(sys.argv) > 2 else "p3e_espa_scene.xml", hold_s=5.0, mon=True, mon_act=True))
 same = 0
 for m in ms:
     r = sim.run(np.random.default_rng(m["seed"]), spin_deg_s=m["spin"], spin_axis=m["axis"])
