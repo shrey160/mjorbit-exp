@@ -1,5 +1,6 @@
 # ESPA E3 freeze v1 2026-11-12: robot_spec wiring (p3b bit-identical, 20/20), inertia-scaled bus gains, ESPA pregrasp_d 1.25; set after the ESPA tune split (no tuning changes). p3b v2 in e3_freeze.sha256
 # v1.1 2026-11-12: grasp_sim.py adds step_hook (None = no-op; p3b 20/20 identical after it); grasp_sim.py was edited at 11:21 while the validation stage B (started 11:08) ran; the test ran on v1.1. The hook is a no-op either way. v1 kept in e3_espa_freeze_v1.sha256
+# v1.2 2026-11-13: grasp_sim.py adds the P4.3 pose_est hook (None = truth; p3b 20/20 identical after it). Adds p3e_espa_arm2_scene.xml (realistic arm, SPEC_3 14.4), on which the 25-mission arm2 E3 ran. v1.1 kept in e3_espa_freeze_v1_1.sha256
 af125a372941bc4ea94a2364c7073aa7ffb1c5c7a936ea6b862d43d6ea979c7d *capture_env.py
 78874195ae09e38a428ddd4dc7e01fd7526c3c5216fe26c8eae285a4954a7e56 *capture_guidance.py
 79a35e0676237c84849ae151d3462deb31f0d41257f514e3df469fe3a223e5bb *check_espa.py
@@ -20,7 +21,7 @@ cf0b743eae5b291f0daa0cd1bc5d68dc147fc72e2ce4a62cb9d9f4a61b3546d5 *evaluate_p3b.p
 9ecd34db6760b372076d592808b14f17eee6108cd5c04fb595fef69229e3686f *evaluate_p3e_safety.py
 bbbbd90c1791564c6d4980a36800e9de66ddca7129d2527fbd9b78feed2b3382 *export_replay.py
 c2eec169da42748e21f4e6054b7520741943398cc66e053953be62143342c839 *flyin.py
-c4d4e2e2da6f8c8c64775d353a612060c510f05b5ff0f07739ab6bea9b2030ac *grasp_sim.py
+16d2778fd4e568a6306a53cae58a9f896ffcab1ef151fbddf61b3db7f8862928 *grasp_sim.py
 d03314e88503c2aca8c26b7da1b029d0040e2b7bd48632740254f132c960e04d *loadtest_p3b.py
 683a9e9d0aa1c2988dbf007e42e73d7fdd5b43e6c6282f753e1e8d0fe59ba425 *maneuver3d.py
 e1ee1433dd895bd572b9f2ffe7ea22ba53f2c2b8d13fcc95e2aaeb41c01a4548 *probe_api.py
@@ -35,3 +36,4 @@ a3342cffa12b559189747210c325f9930acb225cba5d9d8378cc30945b81e013 *p3a_scene.xml
 3553921c795eeb737e2beb31f7e827f88c4f43c14004572a4a144cdf6a4090d1 *p3b_scene_pyramidal.xml
 e8608cde7b6a3c69a08d4f361da0f2e1a6e433c3922f392d153872590d6a0d4e *p3b_scene_round.xml
 912d4bfded6a3e5431d39599926e5d2711596ac5d4bc246edcfee2bc60681ac4 *p3e_espa_scene.xml
+29abc88bc43336472bd39ed1a43d7db9a44cdd68a8ac27ca59cf6f810a43ceaa *p3e_espa_arm2_scene.xml

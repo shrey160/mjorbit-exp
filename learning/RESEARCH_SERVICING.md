@@ -219,3 +219,36 @@ Searched: imitation learning for free-floating capture, LeRobot's current state,
 2. The fair baseline: the classical controller on an image-estimated bar pose (a small keypoint or pose network on the same images). It separates "learning a policy" from "learning perception".
 3. Diffusion Policy as a second learner. Check its latency, and whether short chunks keep it reactive at 2°/s.
 4. Later: the free-floating base (SpacePolicy's base forecast), smooth safety filters, and SmolVLA only if language commands are wanted.
+
+## Arm realism research (13 Nov 2026): what real space arms look like
+
+Asked before making the ESPA arm more realistic (Levels 1+2: joint modules, mass layout, actuator model; same link lengths). Public specs for small (about 1 m) flight arms are scarce: Motiv xLink, GITAI S2 and the Northrop/NRL FREND-heritage arms publish no joint-level numbers that we could read, and several PDFs refused automated fetches. Numbers below are what we could confirm; anything marked *estimate* is ours.
+
+**Arms with published numbers:**
+
+| Arm | DoF / layout | Length | Mass | Joint torque | Joint speed |
+|---|---|---|---|---|---|
+| DLR CAESAR (GEO servicing) | 7, roll-pitch alternating, impedance-controlled, torque sensors in all joints | 2.4 m (up to 5 m) | about 60 kg (3 m version) | 80 N·m max per joint | up to 10°/s |
+| ESA e.Deorbit study arm | 7 | not read | not read | ±80 N·m nominal (Harmonic Drive limit), 176 N·m momentary peak | 10°/s, set for safety |
+| JEM Small Fine Arm (ISS) | 6 | 2.2 m | 190 kg | not found | not found |
+| GITAI S2 (ISS demo) | not read | 1.5 m | not found | not found | not found |
+| OSAM-1 / Restore-L servicing arm | 7: 3-axis shoulder, elbow pitch, 3-axis spherical wrist; 6-axis F/T sensor at the tip; FREND heritage | not confirmed | not found | not found | not found |
+| ETS-VII (first satellite arm, 1997) | 6 | about 2 m | not found | not found | not found |
+| Orbital Express OEDMS (MDA) | 6 | not found | not found | not found | not found |
+| DLR LWR III (terrestrial, basis of ROKVISS and CAESAR joints) | 7 | 1.2 m | load-to-weight about 1:1 | not read | not read |
+
+**Joint modules (DLR drive train, Wedler et al. 2012, read in full):**
+- Each joint is a frameless brushless motor (DLR ILM / RoboDrive) on a Harmonic Drive gear, with motor-side position, link-side absolute position and a link torque sensor between gear and output; power, control and communication electronics sit in the module. Brakes are fitted (failsafe, set when power is off, per a patent on the same layout).
+- Gear ratios: LWR III uses 1:160 (joint 5: 1:100). An HFUC8 at 1:100 gives 2.4 N·m nominal, 4.8 N·m repeatable and 9 N·m momentary peak. ROKVISS used an ILM70 motor on an HFUC25 gear.
+- ROKVISS (2-joint arm on the ISS, 2005–2010, returned to Earth): joint friction rose about **50% in orbit** compared with the ground (20 °C, air) for joint 1, under 20% for joint 2, then stayed constant; temperature dependence was within identification uncertainty. Measured **joint stiffness about 4900 N·m/rad** in space (flex spline plus torque sensor), joint 2.
+- Older NASA concepts: 200:1 harmonic drives, 0.25–0.7 rad/s maximum joint rate; the harmonic drive's compliance dominates the manipulator's, more than the links. Shuttle RMS joints used about 738:1 and 1842:1.
+- An ESA TITAN modular-arm presentation lists a joint module of about 5 kg (444 × 168 × 189 mm) and a gripper of about 8 kg (unconfirmed: slide text only).
+- On-orbit friction identification (Tiangong-2 arm): viscous plus Coulomb friction predicted friction well enough for position control.
+
+**What this means for our arm (1.18 m reach, 6 joints, ESPA servicer):**
+- Our current arm is light (9.2 kg including the gripper) and ideal: capsules, 0.05 kg·m² armature, no friction, 20/15/5 N·m. Real joints are self-contained modules with gear, brake, sensors and electronics, so most of the arm mass sits at the joints, and the motor's inertia seen through a 100–160:1 gear dominates the joint inertia.
+- Real space arms move slowly: 10°/s joint speed is the common safety limit (CAESAR, e.Deorbit).
+- Space joints use torque sensors to fight friction; uncompensated harmonic-drive friction is large and grows in orbit.
+- Joint stiffness (about 5000 N·m/rad) is the main flexibility; it is Level 3 (not modelled now).
+
+**Sources:** [DLR CAESAR](https://www.dlr.de/en/rm/research/robotic-systems/arms/caesar); [CAESAR, IAC 2018](https://elib.dlr.de/122123/1/IAC-2018_IAC-18,D1,6,3,x42634_Final.pdf); [Wedler et al. 2012, DLR's Dynamic Actuator Modules for Robotic Space Applications](https://esmats.eu/amspapers/pastpapers/pdfs/2012/wedler.pdf); [e.Deorbit robotic subsystem](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7805711/) (numbers via search summary; page blocked automated reading); [ESA TITAN presentation](https://indico.esa.int/event/416/contributions/7407/attachments/4906/7533/CSID22_3_Modular%20Robotic%20System%20for%20Future%20Servicing%20and%20Deorbiting%20Missions_presentation_update5.pdf); [JAXA Kibo RMS](https://iss.jaxa.jp/en/about/kibo/rms); [OSAM-1 (eoPortal)](https://www.eoportal.org/satellite-missions/osam-1); [GITAI S2 on the ISS](https://www.therobotreport.com/gitai-dual-armed-robot-heads-to-the-iss-after-successful-launch/); [Motiv xLink](https://www.roboticstomorrow.com/news/2020/05/22/motiv-space-systems-launches-xlink-the-highly-modular-cost-efficient-space-rated-robotic-arm-system/15277); [NASA harmonic-drive space arm study (1990)](https://ntrs.nasa.gov/api/citations/19900019741/downloads/19900019741.pdf); [NASA manipulator concept (1989)](https://ntrs.nasa.gov/api/citations/19890010503/downloads/19890010503.pdf); [Tiangong-2 arm friction identification](https://ieeexplore.ieee.org/document/8484274).

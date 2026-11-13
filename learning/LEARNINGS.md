@@ -181,6 +181,24 @@ Learning research typically keeps navigation and safety classical and puts the p
 - **Check a range sensor where nothing can block it.** The first lidar check read 7–13 cm short because the arm sat between the sensor and the bar. With the arm stowed, the reading was 2.3–2.8 cm short, which is the bar's near face.
 - **demos_v1:** 500 of 500 expert episodes succeeded, 231,500 frames, 9.7 GB, 22 minutes on 20 workers.
 
+## Project 4.3: a learned bar-pose estimator under the classical grasp (12–13 Nov)
+
+- **Find the floor before tuning the network.** v1 stalled at about 14 mm whatever we tried. `mount_floor.py` showed the cause in an hour: ±1 cm, ±1° camera mount randomisation puts a 16–17 mm floor under any single-sensor estimate, because no image reveals a per-episode mount error. Calibrating the mounts to ±1 mm, ±0.1° (floor 1.4 mm) took the error to 2.2 mm median.
+- **Do not augment away the signal.** For pose regression, where the bar sits in the image is the answer, so v2 used photometric augmentation only, with no shifts or crops.
+- **Label at the image time.** Images every 0.25 s with labels taken at the same instant, not the 10 Hz row time.
+- **Train in the cloud when the laptop cannot.** Sustained local GPU training shut the laptop down twice; a free Colab T4 did 30 epochs in 4 hours, resuming from Drive. Validation was flat from epoch 19, so 20 epochs would have done.
+- **Result:** the classical grasp on the estimate matched the true-pose oracle: validation 200/200, held-out sun 200/200, test 300/300, 0 collisions, push at most 1.52 mm/s (limit 2). Spin rate and the held-out lighting made no measurable difference.
+- **Keep the comparison honest:** same seeds for oracle and estimate, the 2 mm/s push limit fixed before any result, and the test split run once.
+
+## A realistic arm, and why the wrist must comply (13 Nov)
+
+- **Research first, then estimate what you cannot find.** Small flight arms publish almost nothing; DLR's joint-module papers, CAESAR and the e.Deorbit study gave the shape of a real arm: self-contained joint modules carrying most of the mass, 100–160:1 harmonic drives, 10°/s joint speeds, torque sensors against friction (`RESEARCH_SERVICING.md`).
+- **An idealised light arm hid a problem.** The old 10 kg arm jittered its wrist at about 24°/s during approach and asked for 1.5× the wrist's torque limit (the actuator clipped it). The realistic gear inertia damped that out.
+- **Grasping needs a compliant wrist.** With 0.1 N·m of Coulomb friction in the wrist joints, almost every E3 mission ended in a grip re-clamp in 3C: the grip-point stiffness (30 N·m/rad) could not twist the wrist while the jaws closed, so the pads seated unevenly and slipped under the identification pulses. Even 0.03 N·m failed on one spinning-client seed. Real arms solve this with a joint torque loop or a passive compliance device; the model's wrist now has viscous damping only. Shoulder and elbow keep their stiction.
+- **Debug one mission, many variants, one process.** Each candidate cause (friction, gear inertia, arm collisions, friction on braked joints) became a scene variant run on the same seed. Two rounds pinned it on the wrist; a plausible fix (no friction on braked joints) changed nothing and was reverted.
+- **Result:** on 25 E3 validation missions the realistic arm matched the old arm mission for mission: 24/25 success, 25/25 safe, 0 unsafe.
+- **Visuals that cannot change physics.** The new gripper look (drive, rails, fingers, wrist camera) uses massless, contactless geoms, and a check confirmed masses, inertias, colliding shapes and a 2000-step simulation are bit-identical.
+
 ## Toward Project 3 and imitation learning
 
 - Vision-language-action models such as π0.5 (about 3B parameters) learn from demonstrations, not rewards. They are too large to fine-tune on an 8 GB GPU and add little when the exact state is already known.

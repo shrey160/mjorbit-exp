@@ -814,3 +814,16 @@ Responses compared on validation (seeds 210,000+, 50 cases, looseness uniform 0.
 - **Nominal non-successes:** two `clear_pred` safe aborts during the fly-in (7000002 at 1.88°/s, 7000135 at 1.22°/s). This is the one systematic difference from p3b, as in validation.
 - **Physical results:** final error ≤ 7.1 cm and 0.15°; mass error ≤ 0.64%; RCS median 17.3 g; fly-in clearance ≥ 0.24 m after the margins.
 - **Conclusion: the ESPA port is complete.** The robot-description layer and mass/inertia gain scaling carry E3 to a servicer of different shape and inertia with no tuning. Success matches p3b within the confidence intervals, and there is no unsafe outcome in 1000 ESPA missions (tune, validation, test). The cost is a higher `clear_pred` abort rate (about 1% of nominal missions), from the ESPA keep-out geometry.
+
+### 14.4 A realistic arm, "arm2" (13 Nov)
+
+Research: `learning/RESEARCH_SERVICING.md`, "Arm realism research". Scene: `p3e_espa_arm2_scene.xml` (the ESPA scene stays as the reference). Kinematics, joint axes and ranges, gripper contact geometry, bus size and the 150.1 kg total are unchanged.
+
+- **Joint modules (mass layout):** shoulder 3 + 3 kg, elbow 2.5 kg, wrist 3 × 1.5 kg (ball-shaped wrist), carbon tubes 0.6 + 0.45 kg, gripper 2.5 kg. Arm 16.55 kg (was 10.1), bus 133.55 kg. Arm geoms collide with the client (class `arm_col`).
+- **Actuators:** armature 0.8 / 0.8 / 0.3 / 0.05 / 0.05 / 0.05 kg·m² (160:1 and 100:1 gearing), torque 60 / 60 / 40 / 12 / 12 / 12 N·m, Coulomb friction 0.3 / 0.3 / 0.2 N·m on shoulder and elbow, **none on the wrist** (viscous damping only, see below). The 10°/s joint speed limit is recorded, not enforced.
+- **Gripper visuals:** drive motor, guide rails, finger carriages, F/T ring and a wrist camera on a mast, all massless and contactless (`check_vis_identical.py`: bit-identical physics).
+- **Static check (`check_arm2.py`):** stowed 0.651 × 0.600 × 0.900 m (fits ESPA), radius 0.596 m, reach unchanged; shoulder inertia in the ready pose 6.9 kg·m² (was 3.9).
+- **3B smoke (`arm2_smoke.py`, 8 seeds, still and 2°/s):** 8/8 and 8/8, no arm contact, push 0.6–0.65 mm/s median; joint speed ≤ 9.8°/s; at most 8% of any torque limit. The old arm reached 26°/s at the wrist and asked 1.5× its wrist torque limit.
+- **3C grip problem:** with 0.1 N·m wrist friction nearly every E3 mission ended `grip_reclamped` (pad_chatter in identification). Single-mission variants (`dbg_arm2_3c.py`) traced it to the wrist friction: the grip-point rotation stiffness could not twist the wrist while the jaws closed, so the pads seated unevenly. 0.03 N·m still failed seed 6000015 (spinning client, pad drop 4 s into detumble). The wrist now has no stiction, standing in for a torque-controlled or passively compliant wrist.
+- **E3, first 25 validation missions (`run_e3_arm2.sh validation 25`, reusing the ESPA stage-A hand-off, which only depends on mass and bounding radius):** **24/25 success, 25/25 safe, 0 unsafe**, nominal 22/22; every outcome matches the ESPA arm on the same seeds (the miss is the stuck-thruster safe abort on both). Final error ≤ 6.6 cm and 0.12°, mass error ≤ 0.39%, fly-in clearance ≥ 0.29 m, RCS median 17.4 g.
+- **Replay:** `export_mission.py` records a whole mission (seed 6000000: 1601 s, 13.7 m move, 58° turn, 3.0 cm / 0.08° final) for `replay/index.html`, now with Earth below.

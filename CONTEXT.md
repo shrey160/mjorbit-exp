@@ -1,10 +1,66 @@
 # mjorbit project context
 
-Last updated: 12 November 2026.
+Last updated: 13 November 2026.
 
 This file records the user's goals, work completed, verified setup, and lessons from this conversation. Read it when continuing the project. Runtime details such as whether the viewer is still running must be checked again.
 
 ## Resume here (next session)
+
+**13 Nov, stopped here. Start with this block.**
+- **Colab v2 training finished** (30 epochs, 234 min on a T4). Best epoch 23; validation median / 95th percentile:
+  - all frames 2.2/6.1 mm, 0.17/0.55°;
+  - approach 2.0/5.5 mm, 0.11/0.26°;
+  - close 1.7/3.8 mm.
+  - From epoch 19 on, validation stayed flat at about 2.2–2.3 mm while training loss kept falling (to 0.0006). 20 epochs would have been enough.
+- **Checkpoints on disk:**
+  - final best: `colob_ops/best_v2_1.pt`, copied to `/home/shrey31/p4_data/pose_v2/best_final.pt`;
+  - last epoch: `colob_ops/last_v2.pt`;
+  - epoch 4: `colob_ops/best_v2.pt`, copied to `best_ep4.pt`.
+- **Oracle closed loop done:** `p4_vision/p43_val_oracle.json`, 200/200 successes, max push 0.99 mm/s, 3 min.
+- **Estimate closed loop done (13 Nov, `p4_vision/p43_val_est_final.json`, 14 min on 8 CPU workers):**
+  - 200/200 successes (95% CI 98.1–100%), 0 collisions, 0 aborts, 0 over the push limit;
+  - max push 1.02 mm/s (oracle 0.99), max bar shift 1.94 mm (oracle 1.81);
+  - estimate error medians: settle 3.5 mm, reach 2.7 mm, approach 2.2 mm; at close 2.1 mm median, 5.3 mm p95, 7.0 mm max.
+  - The rerun command: `bash projects/p4_vision/run_p43_eval.sh <ckpt> <tag> 200`.
+- **Held-out sun done (13 Nov, `p43_val_est_final_holdout.json`, `run_p43_holdout.sh`, 12 min):** same 200 validation seeds, sun inside the 15° held-out cone (never in training).
+  - 200/200 (95% CI 98.1–100%), 0 collisions, 0 aborts, 0 over the push limit; max push 1.06 mm/s, max bar shift 1.99 mm.
+  - Estimate error medians: settle 3.1 mm, reach 2.5 mm, approach 2.2 mm; at close 2.0 mm median, 4.4 mm p95, 6.0 mm max. No loss against normal lighting.
+- **Test split done, run once (13 Nov, seeds 7,000,000–299, `run_p43_test.sh`, `p43_test_oracle.json`, `p43_test_est_final.json`):**
+  - Oracle 300/300 (95% CI 98.7–100%), max push 1.06 mm/s, 4.4 min.
+  - **Estimate 300/300 (98.7–100%)**, 0 collisions, 0 aborts, 0 over the push limit; max push 1.52 mm/s (seed 7000082, close error 7.2 mm; oracle 0.77 there), max bar shift 1.94 mm, 19.7 min.
+  - Estimate error medians: settle 3.6 mm, reach 2.5 mm, approach 2.2 mm; at close 2.2 mm median, 4.4 mm p95, 9.4 mm max (seed 7000208, push still 0.81 mm/s).
+- **Spin-rate breakdown done (13 Nov, `spin_breakdown.py`, no new simulation):** bins 0–0.5 / 0.5–1 / 1–1.5 / 1.5–2°/s (46/48/45/61 seeds), all bins 100% in all three runs.
+  - Estimate error at close (median / p95): 1.8/4.7, 2.3/5.5, 2.2/5.2, 2.2/5.3 mm; approach 1.9–2.4 mm median. Correlation of spin with the error at close is +0.12 (both lighting sets), so spin barely matters.
+  - Max bar shift grows with spin in the oracle too (0.46 → 1.81 mm), so it comes from the classical grasp, not the estimate.
+  - Odd but harmless: median client push is lower with the estimate (about 0.45 mm/s) than with the oracle (about 0.8 mm/s); max push is the same (about 1 mm/s). Not explained yet; maybe the EMA smoothing or the latch at close.
+- **Then:**
+  - held-out sun;
+  - spin-rate breakdown;
+  - test split of 300, run once;
+  - re-export the browser replay with `best_final.pt` and republish the same artifact (https://claude.ai/artifact/4kfsXQvUnRcTjoMvFB2RKA, currently uses epoch 4);
+  - write up SPEC_4, LEARNINGS and CONTEXT;
+  - re-freeze `grasp_sim.py`;
+  - commit and push. `p4/replay/index.html` is not tracked by git because of the `**/replay/` rule in `.gitignore`.
+
+**13 Nov: realistic arm "arm2" (Levels 1+2), first checks.**
+- Research first: `learning/RESEARCH_SERVICING.md`, "Arm realism research" (CAESAR, e.Deorbit, ROKVISS/DLR joint modules, JEM SFA; small 1 m flight arms publish almost nothing).
+- Scene `projects/p3_capture/p3e_espa_arm2_scene.xml` (the ESPA scene stays as the reference). Same kinematics, ranges, gripper, bus size and 150.1 kg total.
+  - Level 1: joint housings carry the mass (shoulder 3 + 3 kg, elbow 2.5, wrist 3 × 1.5, carbon tubes 0.6 + 0.45, gripper 2.5); arm 16.55 kg (was 10.1), bus 133.55 kg; arm geoms now collide with the client (class `arm_col`).
+  - Level 2: armature 0.8/0.8/0.3/0.05/0.05/0.05 kg·m² (160:1 and 100:1 gearing), torque 60/60/40/12/12/12 N·m, residual friction 0.3/0.3/0.2/0.1/0.1/0.1 N·m; 10°/s joint speed limit recorded, not enforced.
+- Static check (`check_arm2.py`): stowed 0.651 × 0.600 × 0.900 m (fits ESPA), radius 0.596 m, reach unchanged; shoulder inertia in the ready pose 6.9 kg·m² (was 3.9).
+- Grasp smoke (`arm2_smoke.py`, `run_arm2_smoke.sh`, 3B grasp, 8 seeds, still and 2°/s, no controller retuning):
+  - arm2 8/8 and 8/8, no arm-client contact, push median 0.6–0.65 mm/s, max 0.84 (old arm 0.8, 0.93).
+  - Joint speed peak 9.2°/s in reach, 1.9°/s in approach: within 10°/s. The old arm hit 26°/s at the wrist and asked 1.5× its wrist torque limit (wrist jitter in approach); arm2 uses at most 8% of any torque limit.
+  - Approach tracking error max 11.6 mm (old 8.2): the heavier arm lags the impedance target more.
+- **3C grip problem found and fixed (13 Nov):** in the first E3 attempt on arm2 nearly every mission ended `grip_reclamped` (pad_chatter in 3C identification). Single-mission debug (`dbg_arm2_3c.py`, `run_dbg_arm2.sh`, seeds 6000001–2): removing all friction or only the **wrist** friction fixes it; removing shoulder/elbow friction, gear inertia or arm collisions does not; dropping friction on braked joints in `stack_sim.lock_arm` did not help (reverted). Cause: 0.1 N·m wrist friction against the 30 N·m/rad grip rotation stiffness kept the wrist from complying while the jaws closed, so the pads seated unevenly. Wrist friction now 0.03 N·m (0.02 and 0.05 both pass). Gripper visuals swapped into `p3e_espa_arm2_scene.xml` at the same time (physics bit-identical).
+- **Run sizes (user, 13 Nov):** demonstration project, keep runs small (about 25). `run_e3_arm2.sh <split> [N=25] [workers=8]` runs the first N missions; P4.3 eval scripts default to 25.
+- **Wrist stiction removed (13 Nov):** seed 6000015 (spin_axis_err, 1°/s) still re-clamped with 0.03 N·m wrist friction (pad drop 4 s into detumble); removing wrist friction or the shoulder/elbow gear inertia fixed it, removing shoulder/elbow friction or arm collisions did not. The arm2 wrist now has only viscous damping (no Coulomb stiction), as a stand-in for a torque-controlled or passively compliant wrist; shoulder/elbow keep 0.3/0.3/0.2 N·m.
+- **E3 on arm2, 25 missions, final (13 Nov, same seeds):** **24/25 success (96%, CI 80–99%), 25/25 safe, 0 unsafe**, nominal 22/22, all three faulted missions as on the old arm (thruster_stuck seed 6000016 safe abort, the others success). Every mission's outcome matches the old ESPA arm. Final error ≤ 6.6 cm and 0.12°, mass error ≤ 0.39%, fly-in clearance ≥ 0.29 m, RCS median 17.4 g, 8.6 min.
+- **Full-mission replay (13 Nov):** `export_mission.py <out.json> <seed> [scene]` records a whole E3 mission (fly-in from the hold point, grasp, brakes, detumble, id, 3D move) by wrapping GraspSim.run and StackRun._step; 4 fps to capture, 1 fps after. Seed 6000000 on arm2 → `replay/mission_arm2.json` (1601 s, 13.7 m move, 58° turn, 3.0 cm / 0.08° final). The replay page (https://claude.ai/artifact/WxRmRjcM5Zu4DoBkTQhKw8, version 2) now opens on "Full mission, new arm"; the camera follows the stack, new phase colours, 300× speed. Local check: `.claude/launch.json` "replay" serves `projects/p3_capture/replay` (the browser pane must be visible, or animation frames stop). Version 3 adds Earth: the exporter records the radial direction per frame (LVLH x in the world frame; world is client-centred and inertial, so it turns about 104° over the mission); the page draws a procedural Earth with atmosphere and stars as a background layer in km, 400 km below, plus an "Earth below" camera. The sim has no Sun model: the page puts the sun at (0.45, 0.8, 0.4) so this arc stays in daylight.
+- *Superseded (wrist 0.03 N·m):* **E3 on arm2, 25 missions done (13 Nov, validation 6000000–24, 9 min on 8 workers, `results_e3_arm2_validation_n25.json`):** 23/25 success (92%, CI 75–98%), 25/25 safe, 0 unsafe; nominal 22/22. Faulted: thruster_weak success, thruster_stuck safe abort (same as the old arm), spin_axis_err seed 6000015 grip re-clamp (old arm: success; one pad drop, worth a look). Final error ≤ 6.4 cm and 0.13°, mass error ≤ 0.36%, fly-in clearance ≥ 0.29 m, RCS median 17.5 g. Old arm on the same 25 seeds: 24 success, 1 safe abort.
+- *Superseded:* **E3 validation on arm2 started 13 Nov about 04:30 UTC** (`run_e3_arm2.sh validation 12`, log `p3_capture/e3_arm2_val.log`, 499 missions, 12 workers, about 4 h). Reuses the ESPA stage-A hand-off (stage A only uses mass and bounding radius, unchanged). If interrupted, rerun the same command: it resumes from `results_e3_arm2_validation.json.partial.jsonl`. Compare with ESPA validation: 84.8% success, 99.8% safe, 0 unsafe, nominal 395/399.
+- **Gripper visuals (13 Nov), waiting in `p3e_espa_arm2_scene.next.xml`:** jaw drive motor, guide rails with end caps, finger carriages and backing plates, F/T ring, wrist camera on a mast; class `vis` (density 0, no contact). `check_vis_identical.py`: masses, inertias, colliding geoms and a 2000-step simulation are bit-identical. **Swap it over `p3e_espa_arm2_scene.xml` once the E3 run ends** (E3 reloads the scene per mission). Renders: `output/arm2/arm_compare.png`, `gripper_compare.png` (`render_arm2.py`, `render_gripper.py`).
+- **Not yet checked on arm2:** fly-in, 3C/3D (brakes, detumble with the heavier arm), E2/E3, P4 camera scene and images.
 
 **12 Nov: the ESPA servicer port is complete (SPEC_3 §14).**
 - `robot_spec` is wired in; p3b gives bit-identical results (20/20 E3 missions, re-checked after `step_hook`).
@@ -25,7 +81,7 @@ This file records the user's goals, work completed, verified setup, and lessons 
 **P4.3 in progress (12 Nov, stopped by three laptop shutdowns, two of them from overheating):**
 - **Built** (all in `projects/p4_vision/`):
   - `data_stats.py`: in the bus frame the bar moves 12 cm median during an episode (up to 30 cm); a mean-pose guess is off by 48 mm median.
-  - `pack_data.py`: demos_v1 unpacked to memmaps at `/home/shrey31/p4_data/demos_v1_pack` (23 GB; done, intact).
+  - `pack_data.py`: packs a demo set into memmaps. **v1 data deleted 12 Nov** (`demos_v1`, `demos_v1_pack`, `tmp/colab_upload`, about 43 GB), at the user's request; v1 results stay in this file and SPEC_4.
   - `pose_net.py` (2.7M parameters: a CNN per sensor plus the arm joint angles → bar position and rot6 in the bus frame).
   - `train_pose.py`: resumable; saves `state.pt` every epoch.
   - `pose_est.py` (`NetPoseEst`: 10 Hz estimate, EMA smoothing, latched at close, velocity feed-forward from the bus's own motion).
@@ -432,7 +488,7 @@ The user's viewer demos (`capture_stabilize_mppi`, `arm_reach_mppi`) are MPPI pl
 
 Viewer address: [http://localhost:8080/](http://localhost:8080/).
 
-The viewer is not running (last stopped at the 7 November session end). Check before starting another server on the same port.
+The viewer is not running (started and stopped again on 13 Nov). Check before starting another server on the same port. Check before starting another server on the same port.
 
 The default `free_drift` task shows a dual-arm spacecraft with solar wings, slow tumble, and periodic arm motion. Default altitude is 500 km. The user adjusted the altitude control to 770 km during exploration; do not reset user settings merely to match defaults. Some parameters require Reset to take effect.
 

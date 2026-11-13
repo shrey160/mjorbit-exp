@@ -130,12 +130,41 @@ Files are in `projects/p4_vision/`; run them with `bash run_p4.sh <script> ...` 
 - **Still on truth, as stated limitations:** the bus station keeping and the E2 monitors.
 - **Report:** estimator error per phase (validation episodes), then closed-loop success, push, bar shift and aborts on the same seeds as the oracle.
 
+### 4.3 P4.3 result (13 Nov): the estimate is as good as the truth for the grasp
+
+**v1 (Colab T4, 20 epochs, mounts randomised ±1 cm, ±1°):** best epoch 5, 13.8 mm median overall, 11.7 mm while approaching; it overfit after that. `mount_floor.py` showed why: an unknown per-episode mount error of that size puts a 16–17 mm floor under any single-sensor estimate, and no image reveals it.
+
+**v2 (what changed):**
+- **Sensors:** mounts calibrated to ±1 mm, ±0.1° (floor 1.4 mm); bus camera 192 px, lidar 128 px; images every 0.25 s with labels at the image time.
+- **Training:** photometric augmentation only (no image shifts: where the bar sits in the image is the signal).
+- **Data:** `demos_v2`, 500/500 episodes, 7.4 GB; train on episodes < 450 (83,695 frames), select on the rest (4,649).
+- **Training run:** Colab T4, 30 epochs, 234 min. Best epoch 23 (`best_v2_1.pt`); validation flat from epoch 19 while training loss kept falling.
+
+**Estimator error (held-out episodes, median / p95):** all frames 2.2 / 6.1 mm and 0.17 / 0.55°; approach 2.0 / 5.5 mm; close 1.7 / 3.8 mm.
+
+**Closed loop (classical grasp on the estimate, `eval_est.py`, same seeds as the oracle):**
+
+| Run | Oracle (true pose) | Estimate |
+|---|---|---|
+| Validation, 200 seeds | 200/200, max push 0.99 mm/s | **200/200** (CI 98.1–100%), max push 1.02 mm/s, max bar shift 1.94 mm |
+| Held-out sun, 200 validation seeds | – | **200/200**, max push 1.06 mm/s |
+| **Test, 300 seeds, run once** | 300/300, max push 1.06 mm/s | **300/300** (CI 98.7–100%), max push 1.52 mm/s, max bar shift 1.94 mm |
+
+- 0 collisions, 0 aborts and 0 pushes over 2 mm/s in every run.
+- Estimate error at close: validation 2.1 mm median, 5.3 mm p95, 7.0 mm max; test 2.2 / 4.4 / 9.4 mm. The worst test seed for push (7000082, 1.52 mm/s against the oracle's 0.77) had a 7.2 mm close error.
+- **Held-out lighting costs nothing:** error at close 2.0 / 4.4 / 6.0 mm.
+- **Spin barely matters** (`spin_breakdown.py`): every 0.5°/s bin succeeds 100%; median error at close 1.8–2.3 mm across bins; correlation of spin with that error +0.12. Bar shift grows with spin in the oracle too (0.46 → 1.81 mm), so it comes from the classical grasp.
+- **Open:** the median push is lower on the estimate (about 0.45 mm/s) than on the truth (about 0.8 mm/s), with the same maximum; probably the estimate's smoothing or its latch at close. Not investigated.
+- **Limits, as designed:** the bus station keeping, the fly-in and the E2 monitors still use the truth; only the arm controller sees the estimate.
+
+**Realistic arm (arm2, 13 Nov, after P4.3):** the servicer arm was given joint modules, gear inertia, torque limits and friction (`p3e_espa_arm2_scene.xml`, SPEC_3 and `learning/RESEARCH_SERVICING.md`). It changes how the arm looks on camera, so P4 continues with an arm2 camera scene and new demonstrations before P4.4.
+
 ## 5. Evaluation
 
 - **Splits:** demonstrations 8,000,000+; validation 6,000,000+ (E3 validation seeds, grasp phase only, after the fly-in); test 7,000,000+, used once.
 - **Sizes:**
-  - validation 200, giving a CI half-width of about ±3% near 95% success;
-  - test 300, which bounds an unsafe rate of 0 at about 1%, as in E3.
+  - P4.3 used validation 200 and test 300 (CI half-width about ±3% near 95%; an unsafe rate of 0 bounded at about 1%).
+  - **From 13 Nov, about 25 per run** (the user's call: a demonstration project, quick experiments). The confidence intervals are wide and are reported as such.
 - **Compared, on the same seeds:**
   1. classical with true pose (oracle);
   2. classical on estimated pose (P4.3);
