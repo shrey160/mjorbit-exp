@@ -40,6 +40,7 @@ projects/**/logs/
 # --- generated scenes ---
 # temporary case files written by the mjorbit compiler for each episode
 **/.case_*.xml
+**/.demo_release.xml
 # made by projects/p4_vision/make_scene.py from the ESPA scene
 projects/p3_capture/p4_espa_cam_scene.xml
 projects/p3_capture/p4_espa_arm2_cam_scene.xml

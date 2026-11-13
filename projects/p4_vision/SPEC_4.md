@@ -1,6 +1,6 @@
 # Project 4: camera-based, imitation-learned grasp (draft, 12 Nov 2026)
 
-Status: **draft for review. Nothing is built yet.** Research: [RESEARCH_SERVICING.md](../../learning/RESEARCH_SERVICING.md), "Project 4 research (12 Nov 2026)". Agreed direction (10 Nov): learning goes into perception and the grasp policy, contact stays classical, and the E2 monitors shield the learned policy.
+Status (13 Nov): P4.0–P4.3 built and done, on the ESPA arm and on the realistic arm (arm2). **P4.4 onward replanned in §4.4** after a second research pass ([RESEARCH_SERVICING.md](../../learning/RESEARCH_SERVICING.md), "P4.4–P4.7 research"); §4.4 overrides steps 5–8 below where they differ. Original status: draft for review. Research: [RESEARCH_SERVICING.md](../../learning/RESEARCH_SERVICING.md), "Project 4 research (12 Nov 2026)". Agreed direction (10 Nov): learning goes into perception and the grasp policy, contact stays classical, and the E2 monitors shield the learned policy.
 
 ## 1. Question and claim
 
@@ -55,7 +55,7 @@ Status: **draft for review. Nothing is built yet.** Research: [RESEARCH_SERVICIN
    - A small keypoint or pose network on the same images estimates the bar pose; the classical grasp runs on that estimate.
    - This separates "learning perception" from "learning a policy" (research, ranked idea 2).
    - Without it, a learned-policy failure can't be put down to the policy or to perception.
-5. **P4.4 ACT** (LeRobot, 0.5.x as SpacePolicy uses):
+5. **P4.4 ACT** (replanned 13 Nov, see §4.4; original text kept below) (LeRobot, 0.5.x as SpacePolicy uses):
    - Behaviour cloning on P4.2, trained locally on the RTX 4060 (ACT is about 52M parameters).
    - Pick the checkpoint on the validation split.
 6. **P4.5 DAgger** (research §3):
@@ -158,6 +158,177 @@ Files are in `projects/p4_vision/`; run them with `bash run_p4.sh <script> ...` 
 - **Limits, as designed:** the bus station keeping, the fly-in and the E2 monitors still use the truth; only the arm controller sees the estimate.
 
 **Realistic arm (arm2, 13 Nov, after P4.3):** the servicer arm was given joint modules, gear inertia, torque limits and friction (`p3e_espa_arm2_scene.xml`, SPEC_3 and `learning/RESEARCH_SERVICING.md`). It changes how the arm looks on camera, so P4 continues with an arm2 camera scene and new demonstrations before P4.4.
+- **Done 13 Nov:**
+  - arm2 camera scene (`make_scene.py --arm arm2`);
+  - `demos_v3`: 125 episodes;
+  - v3 fine-tune of the pose network: 1.6/3.5 mm;
+  - estimate grasp on arm2: 25/25, as the oracle.
+
+### 4.4 Plan from P4.4 on (13 Nov, replanned)
+
+All of this runs on **arm2** with the v3 network as the P4.3 baseline. Runs are about 25 seeds (§5). One sim job at a time; GPU training on Colab only.
+
+**What the grasp code fixes for the policy** (`grasp_sim.py`, read 13 Nov):
+- **Reach is joint-space:** a minimum-jerk path from stow to an IK solution of the pre-grasp pose. **Approach is Cartesian impedance** toward a target that slides along the bar normal.
+- **Both expert targets depend only on the bar pose and the time in the phase, not on the arm's state.** So the expert can relabel any state the policy visits, given the true bar pose. A "suggest" function is about 50 lines, not a large job.
+- **The policy has no clock.** It must read progress from the images and the arm state. This is normal for ACT.
+- **The approach feed-forward `v_ref` uses the client's velocity and spin, which the policy does not have.** The policy's `v_ref` comes from the difference of its own target chunk instead.
+- **Close and hold freeze the grip relative to the client.** With the policy they use the v3 pose estimate latched at close, as in P4.3, so contact stays classical but runs on estimated perception.
+- **Bus station keeping stays on the true relative pose,** a stated simplification (§2).
+
+**Steps:**
+1. **P4.4a Policy hook in `grasp_sim.py`** (then re-freeze as v1.3).
+   - `self.policy = None` is a no-op, checked bit-identical on p3b, ESPA and arm2.
+   - When set, it is called at 10 Hz in reach and approach, and returns the grip target (bus frame), the rotation and the close flag.
+   - Reach: target → one warm-started IK step → joint PD. Approach: impedance.
+   - The policy's close flag replaces the expert's distance test; the approach timeout still applies.
+   - The same hook carries DART noise (step 2) and later the ACT policy, the hand-over shield and DAgger. Also add `expert_suggest(sim)`: the expert's target for the current state (above).
+2. **P4.4b Demonstrations at 10 Hz, clean and DART** (`gen_demos.py --img-steps 10`).
+   - The images must be at the action rate: `demos_v3` has images at 4 Hz and actions at 10 Hz, and a LeRobot dataset has one rate.
+   - `demos_v4`: 125 clean episodes, plus 125 DART episodes. DART runs the expert's target with noise (a few mm and about 0.5°, an Ornstein–Uhlenbeck process, ramped to 0 within 3 cm of the bar) but labels each frame with the clean expert target.
+   - About 9.5 GB and 30 min, as two runs one after the other (disk: 935 GB free).
+   - Check: the clean set reproduces the `demos_v3` outcomes seed for seed.
+3. **P4.4c LeRobot env and conversion.**
+   - The `rl` env has torch 2.13 and LeRobot 0.6 supports torch 2.7–2.11, so LeRobot gets its own env: Python 3.12, LeRobot **0.6.x pinned** (0.7.0 is a week old, with breaking changes), CPU torch, and the same version on Colab.
+   - Conversion (`to_lerobot.py`, run in that env):
+     - `observation.images.wrist`, `.bus` (192 → 128, since ACT needs one image size) and `.lidar` (range packed into 3 channels: range, inverse range, return mask);
+     - `observation.state` 29-D;
+     - `action` 10-D (target position, rot6, close flag);
+     - 10 fps, local `root`, no Hub push, `finalize()`.
+   - Check: decoded frames equal the npz arrays within video compression (report the PSNR).
+4. **P4.4d ACT on Colab.**
+   - Settings: `chunk_size` 20 (2 s), temporal ensembling 0.01 with `n_action_steps` 1, ResNet-18 ImageNet, `kl_weight` 10.
+   - Training: clean data first, then clean plus DART. Episodes 110–124 (and the matching DART episodes) are validation.
+   - Pick the checkpoint by validation action error (all frames and approach frames), as P4.3 did by position error.
+5. **P4.4e Closed-loop evaluation.**
+   - Same 25 validation seeds as P4.3, E2 monitors on, rendering in the loop at 10 Hz.
+   - Compared: oracle, P4.3 estimate, ACT clean, ACT clean plus DART.
+   - ACT runs on CPU (about 0.1–0.2 s per call): either in the LeRobot env, if mujoco and mjorbit install there, or as a small policy server in the LeRobot env that the sim in the `rl` env calls through a local socket. Smoke-test the first and fall back to the second.
+6. **P4.5 Hand-over shield and DAgger.**
+   - **Hand-over:** before contact, if the policy's target strays from `expert_suggest` by more than a bound (start at 2 cm or 2°), the classical expert takes over for the rest of the grasp. Reported separately: success, safe, aborts, hand-overs.
+   - **DAgger:** 2–3 rounds of 25 episodes on new demonstration seeds. The policy runs with a decaying expert share; every frame is labelled with `expert_suggest`; aggregate and fine-tune on Colab.
+   - Correction (13 Nov, from `safety.py`): the E2 `track` monitor checks the **bus** against its station-keeping reference, not the arm. It needs no change for the policy; the arm-side check is the hand-over bound above.
+7. **P4.6 Shielded evaluation and conditions.** The best ACT, with the E2 monitors (and separately with the hand-over), is run on these conditions:
+   - nominal at 0, 1 and 2°/s;
+   - the held-out sun;
+   - a client kick;
+   - sensor ablations: no lidar, and lidar plus wrist only.
+   - Then the test split once (25 seeds, §5).
+8. **P4.7 Variants, as time allows, each against the same 25 seeds:**
+   - modular ACT (the v3 pose estimate as `observation.environment_state`);
+   - targets relative to the current grip point;
+   - 250 clean episodes (learning curve);
+   - Diffusion Policy last: about 263M parameters, Colab training, slow on CPU, so few seeds.
+
+**Decisions made in this replan:**
+- **DART before DAgger:** the cheapest fix for compounding error, with a scripted expert.
+- **A hand-over to the classical expert as a middle layer under the E2 abort,** because our expert can take over from any state.
+- **ACT's own temporal ensembling** instead of long chunks: our targets move with the spin.
+- **Contact and hold stay on the P4.3 estimate.**
+
+**P4.4a done (13 Nov):**
+- `grasp_sim.py` has `policy` (None = expert), `expert_suggest()` and `_policy_step()`.
+  - Reach: warm-started IK (50 iterations) to a joint reference, its rate by finite difference.
+  - Approach: impedance, with the feed-forward from the target's own rate.
+  - The close flag acts one step later. The approach timeout is kept.
+- **No-change checks (policy None):**
+  - p3b, 20 E3 missions (`run_e3_wiring.sh`): **20/20 identical**;
+  - arm2, 25 E3 missions (`run_e3_arm2.sh validation 25`, against a saved copy): **25/25 identical**.
+- **Frozen as v1.3** (`e3_espa_freeze.sha256`, all hashes OK; v1.2 kept).
+- `p4_vision/policies.py`: `ExpertPolicy` (the expert through the hook) and `DartPolicy`.
+  - DART noise: Ornstein–Uhlenbeck, τ 0.5 s, 2 mm and 0.3° per axis, the norm capped at 2.5σ, ramped to zero between 6 and 3 cm from the bar.
+- **`policy_smoke.py`, 8 validation seeds, arm2, monitors on:**
+
+  | Mode | Success | Push and bar shift vs the expert | Grasp time | Approach tracking error max |
+  |---|---|---|---|---|
+  | Expert | 8/8 | — | — | 11.5 mm |
+  | Expert through the hook | 8/8 | equal | +0.01 s | 7.1 mm |
+  | DART | 8/8 | equal | — | 9.2 mm |
+
+  - The hook's tracking is tighter because the finite-difference feed-forward includes the blend.
+  - A first DART try at 4 mm per axis, uncapped (peaks of 17 mm), gave 2/8 `clear_pred` safe aborts.
+
+**Decided by the user (13 Nov):**
+- **ACT starts on images only:** wrist, bus and lidar, plus the 29-D proprioceptive state. The v3 pose estimate stays out of the input and is used only for the close/hold reference. The modular variant stays in P4.7.
+- **Bus camera 128 px for ACT.** Demonstrations still record it at 192 (the v3 network and the latched hold estimate need 192), and the conversion resizes it.
+- **Lidar included** as a third image (3-channel packing above). If ACT cannot use it well, the no-lidar ablation in P4.6 shows that.
+
+### 4.5 P4.8: the learned last mile as a correction policy (13 Nov, draft)
+
+**Why the plan changed.** End-to-end ACT (§4.4) fails closed loop: 3/25 with temporal ensembling, 5/25 with a classical reach, and 0/25 for both when only the newest prediction is executed (the raw output is noisy by tens of mm; one collision). Offline, its approach error stays at 5–7 mm from 16k to 40k steps while the reach error keeps falling, so the approach is limited by perception and the action form, not by training time. The P4.3 estimator gives 1.6 mm from the same sensors. Scope agreed with the user: classical does everything up to the pre-grasp point and after capture; learning goes into the last 12 cm.
+
+**Split:**
+- **Classical:** spin estimate, fly-in, co-rotation, the reach to the pre-grasp point, the predicted bar motion fed forward to the arm, braking, detumble, identification, stack moves.
+- **Learned:** a bounded correction added to the classical approach **target** (not the torque: the impedance loop would fight it), and the close decision. Zero output is the classical approach.
+- **Inputs to try:** the P4.3 estimate and its rate, the grip-point pose relative to that estimate, wrist force/torque, jaw contact, a short-range distance sensor between the jaws; images only if these are not enough.
+
+**Where classical stops (spin sweep, `run_spin_sweep.sh`, 25 validation seeds per row, arm2, monitors on, episodes start synchronised):**
+
+| Spin | True pose | P4.3 estimate | What goes wrong |
+|---|---|---|---|
+| 2°/s | 25/25 | 25/25 | nothing; push ≤ 1.1 mm/s |
+| 3°/s | 19/25 | 13/25 | captures 24 and 21, but the client push exceeds 2 mm/s in 5 and 9 (up to 8.5 mm/s); estimate error at close 8.4 mm (2.6 at 2°/s) |
+| 4, 5, 6°/s | 11/25 | 11/25 | 14 `track` aborts during reach: the bus cannot hold station |
+
+- By spin axis (true pose): about the approach axis (axis 0, the bar barely moves) 11/11 at every rate up to 6°/s; about the two axes that sweep the bar, 8/14 at 3°/s and 0/14 from 4°/s.
+- **Correction after tracing two 3°/s episodes (`dbg_push.py`, seeds 6000000 and 6000005, true pose): the 3°/s limit is thrust too, not the arm.**
+  - Co-rotation at 3°/s asks 0.95–1.1 N per axis against the 0.75 N limit. The bus is already 75–200 mm off station during approach (and over 500 mm in hold); the arm makes up the difference, and in one case stalls 12 mm short for 5 s near its reach limit.
+  - The client push is not a contact fault. Before the jaws close it is 0.26–0.35 mm/s. It rises to 2.4–2.9 mm/s during the 3 s close and to about 6.5 mm/s in hold, because once the grip is made the client supplies the centripetal force the thrusters cannot (about 0.3 N on 300 kg is 1 mm/s², which matches).
+  - Demand scales with the square of the rate, so the thrust limit sits near 2.6°/s for this standoff.
+- So **no arm-side correction can fix the 3°/s rows**: the fault is a servicer that is not co-rotating when it attaches. The spin-rate task as first drafted is withdrawn.
+
+**What a learned last mile can still be for (to choose):**
+1. **Camera calibration error.** P4.3's 25/25 needs mounts known to ±1 mm; at ±1 cm the estimate had a 16 mm floor. The wrist camera sees the jaws and the bar together, so a policy that servoes on that view does not depend on the mount calibration. This is the clearest gap the classical-on-estimate grasp has at ≤ 2°/s.
+2. **A wobbling (nutating) client,** where the bar does not follow the predicted circle.
+3. **Spin above 2.6°/s,** only after a classical mode exists for it (a closer standoff, or partial co-rotation with the arm following the bar, plus a planned momentum exchange at capture). The learned part would then be the arm's tracking of a bar that moves at cm/s.
+
+**Task chosen by the user (13 Nov): 1, camera calibration error.** Baseline, classical grasp on the v3 estimate, 25 validation seeds, spin 0–2°/s (`run_mount_sweep.sh`):
+
+| Mount error (per axis, per sensor) | Success | Captured | Push over 2 mm/s | Estimate error at close, median / max |
+|---|---|---|---|---|
+| ±1 mm, 0.1° (as trained) | 25/25 | 25 | 0 | 2.2 / 6.2 mm |
+| ±3 mm, 0.3° | 25/25 | 25 | 0 | 4.7 / 12.4 mm |
+| ±5 mm, 0.5° | 24/25 | 25 | 1 | 7.6 / 17.3 mm |
+| ±10 mm, 1° | 16/25 | 24 | 8 | 16.1 / 30.4 mm |
+
+No collisions or aborts in any row: the grasp still closes on the bar, but off-centre, and pushes the client. **Test condition: ±10 mm, 1°. Target: back to at least 24/25.**
+
+**Proposed design (draft, not yet agreed):**
+- A small network reads the wrist image and outputs the bar's position relative to the grip point (the fingers and the bar are both in that image, so the camera mounts drop out). Labels come from the simulator.
+- Over the last 12 cm the classical approach servoes on that offset, and closes when it is inside the 1 cm gate. The v3 estimate stays as the coarse pose for the reach.
+- Data: new demonstrations recorded with ±10 mm, 1° mount error. Training on Colab.
+- Reinforcement learning is kept for afterwards, only if contact or close timing still fails with a good offset.
+
+**First build and result (13 Nov; details in CONTEXT.md):**
+- Built: `palm_cam` between the jaws (the old `wrist_cam` never sees the pads, `probe_wristcam.py`); `policies.BiasPolicy` and `gen_palm.py` (150 off-centre approach episodes, 32,827 frames, mounts ±10 mm, 1°); `palm_net.py`, `train_palm.py` (CPU, 20 min); `pose_est.PalmPoseEst`; `eval_est.py --mode palm`; runner `run_palm_build.sh`.
+- Network, validation median error: across the jaws 1.9 mm, depth 6.1 mm, along the bar 11.6 mm (unobservable on a uniform bar, and the grasp ignores it; the v3 value is kept), rotation not learned (training tilts were only ±2°; the v3 rotation is kept). It overfits at 128 training episodes.
+- Ungated, the palm reading caused collisions (7 to 9 in 25): out of view or in the dark it still answers "centred". **Coarse-to-fine gate:** palm is used only where v3 puts the bar in the palm view and the two agree within 4 cm.
+
+| Mount error | v3 alone | v3 + gated palm | Typical push, v3 / palm |
+|---|---|---|---|
+| ±1 mm, 0.1° | 25/25 | 23/25 | 0.50 / 0.57 mm/s |
+| ±5 mm, 0.5° | 24/25 | 23/25 | 0.93 / 0.56 mm/s |
+| ±10 mm, 1° | 16/25 | **22/25** | 1.70 / 0.75 mm/s |
+
+- 0 collisions and 0 aborts in every gated run. The palm correction makes the result nearly independent of calibration, but has its own floor of about 2 hard pushes in 25, so it does not reach the 24/25 target and is slightly worse than v3 at 1 mm.
+
+**Second build (13 Nov): palm light and more data.** Tracing the hard pushes (`dbg_palm.py`) showed the palm image going black near the bar (the gripper shadows it) and the dark pads vanishing, so the network called the bar centred while it was 6–15 mm off. Added `palm_light`, a spot beside the palm camera that is on only while `palm_cam` renders (other images and the physics unchanged; oracle 25/25 identical). Re-recorded 300 episodes (`palm_v2`, 65,706 frames) and retrained (`palm_net_v2`, 17 min on CPU): validation median error across the jaws 0.95 mm, depth 2.3 mm.
+
+| Mount error | v3 alone | v3 + gated palm v2 | Push with palm v2, median / max |
+|---|---|---|---|
+| ±1 mm, 0.1° | 25/25 | 25/25 | 0.31 / 0.62 mm/s |
+| ±5 mm, 0.5° | 24/25 | 25/25 | 0.41 / 0.75 mm/s |
+| ±10 mm, 1° | 16/25 | 25/25 | 0.47 / 0.99 mm/s |
+| ±10 mm, 1°, fresh seeds 6000100–124 | 16/25 | 25/25 | 0.50 / 1.75 mm/s |
+
+- 0 collisions, 0 aborts and 0 over the push limit in every palm v2 run. The fresh-seed row is the fair one: the darkness problem was found by tracing three of the first 25 seeds.
+- **Target met** (at least 24/25 at ±10 mm, 1°). At ±10 mm over both seed sets: 32/50 without the palm correction, 50/50 with it.
+- **Limits:** rotation and the position along the bar still come from v3; spin ≤ 2°/s; the arm's own kinematics are taken as calibrated; validation seeds only (the test split is unused).
+
+**Open choices (user):**
+- What next: the full demo (30 m start, capture, align, release, retreat), palm rotation, or the test split.
+- (Earlier) How far to take the palm network (trace the hard pushes, more data, larger tilts, a bar-in-view output). The user chose reinforcement learning as the training method (13 Nov) for the spin-rate task; whether it is still the right method depends on the task (task 1 could be plain supervised learning of the jaw-to-bar offset from the wrist image).
+- Which extra sensors to add to the scene first (force/torque and jaw contact are the cheapest: the simulator already has the contact forces).
 
 ## 5. Evaluation
 

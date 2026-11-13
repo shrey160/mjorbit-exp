@@ -252,3 +252,130 @@ Asked before making the ESPA arm more realistic (Levels 1+2: joint modules, mass
 - Joint stiffness (about 5000 N·m/rad) is the main flexibility; it is Level 3 (not modelled now).
 
 **Sources:** [DLR CAESAR](https://www.dlr.de/en/rm/research/robotic-systems/arms/caesar); [CAESAR, IAC 2018](https://elib.dlr.de/122123/1/IAC-2018_IAC-18,D1,6,3,x42634_Final.pdf); [Wedler et al. 2012, DLR's Dynamic Actuator Modules for Robotic Space Applications](https://esmats.eu/amspapers/pastpapers/pdfs/2012/wedler.pdf); [e.Deorbit robotic subsystem](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7805711/) (numbers via search summary; page blocked automated reading); [ESA TITAN presentation](https://indico.esa.int/event/416/contributions/7407/attachments/4906/7533/CSID22_3_Modular%20Robotic%20System%20for%20Future%20Servicing%20and%20Deorbiting%20Missions_presentation_update5.pdf); [JAXA Kibo RMS](https://iss.jaxa.jp/en/about/kibo/rms); [OSAM-1 (eoPortal)](https://www.eoportal.org/satellite-missions/osam-1); [GITAI S2 on the ISS](https://www.therobotreport.com/gitai-dual-armed-robot-heads-to-the-iss-after-successful-launch/); [Motiv xLink](https://www.roboticstomorrow.com/news/2020/05/22/motiv-space-systems-launches-xlink-the-highly-modular-cost-efficient-space-rated-robotic-arm-system/15277); [NASA harmonic-drive space arm study (1990)](https://ntrs.nasa.gov/api/citations/19900019741/downloads/19900019741.pdf); [NASA manipulator concept (1989)](https://ntrs.nasa.gov/api/citations/19890010503/downloads/19890010503.pdf); [Tiangong-2 arm friction identification](https://ieeexplore.ieee.org/document/8484274).
+
+## P4.4–P4.7 research (13 Nov 2026): ACT, DAgger, shield, second learner
+
+Searched: the current LeRobot release, its ACT defaults and dataset API, ACT data needs and CPU latency, DAgger with chunked policies and scripted experts, runtime monitors for learned policies, action frames for moving targets, and new space-capture imitation work. Read in full: the LeRobot v0.5 and v0.6 release posts, ACT's `configuration_act.py` on main, and the dataset-v3 doc page. The rest comes from search snippets and abstracts. Also checked our own data (`demos_v3/ep_8000000.npz`).
+
+**1. LeRobot now.**
+- **Releases:**
+  - 0.5.0 (9 Mar 2026): Python ≥ 3.12; Real-Time Chunking for flow and diffusion policies ([v0.5](https://huggingface.co/blog/lerobot-release-v050)).
+  - 0.6.0 (7 Jul 2026): torch 2.7–2.11; depth video in datasets; `lerobot-rollout` with a DAgger strategy; about 2× faster video data loading ([v0.6](https://huggingface.co/blog/lerobot-release-v060)).
+  - 0.7.0 (about 5 Nov 2026): a long list of breaking changes. Source is a third-party write-up ([explainx](https://explainx.ai/blog/lerobot-v0-7-0-interactive-rollouts-disk-less-streaming-remote-policy-server-cosmos-3-yam-unitree-g1-2026)); the official notes were not read.
+  - **Pin one version** for both Colab and WSL. 0.6.x is the settled choice; take 0.7.0 only if one of its features is needed.
+- **DAgger in LeRobot:** `lerobot-rollout --strategy.type=dagger` records human take-overs from a leader arm, with an intervention flag per frame. A scripted expert is not mentioned, so our DAgger loop stays our own code; only its output goes into a LeRobot dataset.
+- **Dataset v3** ([docs](https://huggingface.co/docs/lerobot/en/lerobot-dataset-v3)):
+  - The sequence is `LeRobotDataset.create(...)`, then `add_frame` per step, then `save_episode`.
+  - **`finalize()` is required**, or the Parquet files are left incomplete.
+  - A local `root=` works and pushing to the Hub is not needed, which keeps the rule of no data in git or on the Hub.
+  - Read the exact `create` and `add_frame` signatures from the installed version.
+
+**2. LeRobot ACT defaults and limits** ([configuration_act.py](https://github.com/huggingface/lerobot/blob/main/src/lerobot/policies/act/configuration_act.py)).
+- **Defaults (about 52M parameters):**
+  - network: ResNet-18 (ImageNet weights) per camera; a 4-layer encoder and a 1-layer decoder at width 512; CVAE latent 32;
+  - training: `kl_weight` 10, dropout 0.1, AdamW lr 1e-5 (backbone 1e-5);
+  - chunking: `chunk_size` 100 and `n_action_steps` 100. Temporal ensembling is off; its usual coefficient is 0.01, and with it on, `n_action_steps` must be 1.
+- **All cameras must have the same image shape.** Ours are wrist 128, bus 192 and lidar 128, so either resize the bus camera to 128 (or render it at 128) or upsample the others.
+- **The lidar needs 3 channels.** Images go through a 3-channel ResNet, so the lidar depth image has to be packed into 3 channels, for example range, normalised range and a return mask.
+- **Non-image inputs:** `observation.state` (proprioception) and `observation.environment_state` (any other vector).
+  - The P4.3 pose estimate could go in `environment_state`.
+  - That gives a "modular" variant to compare with the pure-image one.
+
+**3. Our data does not fit ACT as recorded.** `demos_v3` stores images at 4 Hz (every 0.25 s) and actions at 10 Hz (every 0.1 s), but a LeRobot dataset has one fps for both. Options:
+- **Re-record with images at 10 Hz (`--img-steps 10`).** 125 episodes would be about 4.7 GB and take about 15 min on 8 workers. This is the cleanest: same seeds, same physics.
+- **Build a 4 Hz dataset** with the action interpolated to the image times. The targets are smooth, but the close flag is a step. Cheaper, but a 4 Hz policy reacts more slowly to a 2°/s spin.
+- **Recommended:** re-record at 10 Hz, and record the DART variant (§5) in the same pass.
+
+**4. Data size, chunk size, latency.**
+- **Data size:**
+  - ALOHA-style ACT needs about 50 demonstrations per fixed task (secondary sources).
+  - AstroBench used 400 demonstrations for 14/20 captures.
+  - Our task varies spin rate and axis, so 125 may be thin. Plan a learning curve (125, then 250) on the 25 validation seeds.
+- **Chunk size:**
+  - Guides tie the chunk to one sub-motion.
+  - The default 100 steps at 10 Hz is 10 s, longer than our approach phase.
+  - Start with a chunk of 20 (2 s) and execute 5, or use temporal ensembling with `n_action_steps` 1.
+- **CPU latency:** about 180 ms per ACT forward pass on an M1 CPU, 5 ms on an RTX 4090 ([LeRobot paper](https://arxiv.org/pdf/2602.22818)).
+  - The simulation does not need to run in real time.
+  - A CPU-only evaluation at 10 Hz is about 470 forward passes (about 1 min) per episode per worker, so 25 episodes on 8 workers take a few minutes.
+  - Temporal ensembling (a forward pass every step) is affordable.
+
+**5. Before DAgger: DART noise injection.**
+- **What it is:** DART injects noise into the expert's executed actions while recording, but labels each frame with the expert's clean action, so the demonstrations show recoveries.
+- **Results:** with a scripted supervisor in MuJoCo it was up to 3× cheaper than DAgger, and 62% better than plain behaviour cloning in a grasping task ([DART](https://arxiv.org/pdf/1703.09327), [BAIR blog](https://bair.berkeley.edu/blog/2017/10/26/dart)).
+- **For us:** a few lines in the recorder. Perturb the commanded grip target (a few mm, ramped down near close) and save the clean target. It needs no expert query on the policy's states.
+- **Related work:**
+  - Recent work combines the two: noise set from the policy's own error, plus HG-DAgger-style gated corrections ([Policy-Calibrated DAgger, arXiv 2609.30462](https://arxiv.org/html/2609.30462v1)).
+  - No paper was found that runs DAgger on ACT with a scripted expert.
+- **DAgger needs an expert "suggest" function:** given any sim state, the target the classical expert would command now.
+  - **Revised after reading `grasp_sim.py`:** the expert's reach and approach targets depend only on the bar pose and the time in the phase, not on the arm's state. So the suggest function is small (about 50 lines); see SPEC_4 §4.4.
+  - The same targets also mean DART's main gain for us is broader state coverage with correct labels; the recovery itself is done by the low-level tracking.
+  - The P4.6 `track` monitor needs the same function, so build it once.
+
+**6. Shield and failure detection.** Detecting failure is well covered; recovery is usually a rollback or a corrected action, not a hand-over to a classical controller.
+- **Rewind-IL:** online failure detection plus state respawning for chunked policies ([arXiv 2604.16683](https://arxiv.org/pdf/2604.16683)).
+- **FIPER (NeurIPS 2025):** failure prediction without failure data, from out-of-distribution signals in the policy's embedding space and from action uncertainty.
+- **FAIL-Detect:** extracts scalar signals from the policy and calibrates a threshold ([arXiv 2503.08558](https://arxiv.org/html/2503.08558v1)).
+- **TAIL-Safe:** a Q-function safe set with gradient-based recovery; success under perturbation rose from 20% to 100% ([summary](https://www.emergentmind.com/papers/2605.01195)).
+- **For us:**
+  - Keep the E2 monitors and abort as the shield, the hard safety layer.
+  - Add a **hand-over to the classical expert** when the policy drifts, for example when its target strays from the expert's suggestion beyond a bound before contact. It is a cheap middle step that we can do and most papers can't, because our expert can take over from any state.
+  - Report success, safe outcomes, aborts and hand-overs.
+
+**7. Moving target and action frame.**
+- **Literature:**
+  - Space-capture imitation, where the grasp point drifts between steps, needed temporal consistency (a 2026 paper using an inter-frame correlation network; snippet only).
+  - Object-centric and relative actions help when the robot–object relation keeps changing (SPOT [arXiv 2411.00965](https://ar5iv.labs.arxiv.org/html/2411.00965), X-Imitator [arXiv 2605.12162](https://arxiv.org/html/2605.12162)).
+  - There is no consensus on absolute versus relative actions ([arXiv 2602.23408](https://arxiv.org/pdf/2602.23408)).
+- **For us:**
+  - Start with absolute grip targets in the bus frame, which is what we record.
+  - Try targets relative to the current grip point as the first variant.
+  - Bar-frame targets would need the bar pose, which means the modular variant.
+
+**8. Second learner.**
+- **Real-Time Chunking:** in LeRobot it works for flow and diffusion policies (the Pi0 family, SmolVLA, Diffusion), not ACT.
+- **Diffusion Policy:** about 263M parameters, so training belongs on Colab. Evaluation on CPU will be slow (many denoising steps per call), so use short episodes and few seeds.
+- **Space capture:** no new 2026 visuomotor space-capture result was found beyond SpacePolicy and AstroBench.
+
+**Recommended order** (replaces the SPEC_4 P4.4–P4.7 details where they differ):
+1. **Environment:** a separate `lerobot` env in WSL with a pinned version, and the same version on Colab.
+   - CPU torch is enough for conversion and evaluation.
+   - Include mujoco and mjorbit so the evaluation runs our GraspSim directly.
+2. **Data:**
+   - Re-record the demonstrations with images at 10 Hz: 125 clean episodes plus 125 DART episodes, about 25 min of recording, one run at a time.
+   - Convert them to LeRobot v3: bus camera at 128, lidar in 3 channels, 29-D state, 10-D action.
+3. **ACT behaviour cloning on Colab:**
+   - Chunk 20; train on the clean data first, then clean plus DART.
+   - Evaluate on 25 validation seeds against the oracle and P4.3, with the E2 shield on.
+4. **Expert suggest function:** use it for the `track` monitor, the hand-over shield and DAgger (2–3 rounds of 25 episodes).
+5. **Variants, if time:**
+   - modular ACT (the pose estimate as `environment_state`);
+   - relative actions;
+   - sensor ablation;
+   - 250 episodes.
+   - Diffusion Policy comes last.
+
+## P4.8 research (13 Nov 2026, night): a learned correction for the last mile
+
+Short pass from search summaries (abstracts only, full papers not read). Question: how should a learned policy sit on top of a classical approach when the grasp point moves?
+
+**Residual (correction) policies on a classical controller:**
+- Residual RL (Johannink et al., Siemens and UC Berkeley, arXiv 1812.03201): a hand-written feedback controller plus a learned correction, for contact-rich block insertion; the hand controller alone managed 2 of 20 with randomised block orientation.
+- Residual Feedback Learning (Ranjbar et al., arXiv 2106.04306): a plain residual is limited by the controller's own feedback, which fights the correction; they also let the policy change the feedback signal. Relevant to us: our impedance loop will resist a correction added to its output, so the correction should go on the **target**, not on the torque.
+- Sim-trained residuals for tight insertion (below 1 mm) on a potential-field controller, sparse rewards, zero-shot to hardware (NSF PAR 10599386, 10674874).
+- Hybrid residual RL for book insertion (arXiv 2609.19962): phase-structured; the residual also decides **when to release**, which matches our close decision.
+- Compliant Residual DAgger (arXiv 2506.16685): a residual with a force input that outputs a motion correction and a target force, learned from corrections to a running base policy. The closest match to "correction policy with force sensing, trained by imitation".
+- FACTR 2 (arXiv 2606.12406): force or torque as one more observation token for an ACT-style policy.
+
+**Capturing a spinning or tumbling target with an arm:**
+- The standard requirement is near-zero relative velocity between the end effector and the grapple point at contact (Coordination Control of Free-Flyer Manipulators, arXiv 2303.10812; IAC-15 A2.4, "Dynamic balance of a space manipulator in the capture of a non-cooperative target", which notes that capture fails on excessive relative velocity).
+- The classical recipe: estimate the target's motion with a Kalman filter, predict the grasp point ahead, and plan an intercept with zero relative velocity inside acceleration limits (pre-grasp optimal planning papers; Acta Astronautica 2017 on long-term grasp-point prediction; IAC-13 D3.2.8).
+- No source gave a numeric relative-velocity limit; the full IAC 2015 and Acta Astronautica 2017 papers would.
+
+**What this means for P4.8:**
+1. Keep the predicted bar motion classical (filter plus feed-forward); the learned part corrects the target and decides when to close.
+2. Put the correction on the impedance target (and bound it), so zero output is the classical approach.
+3. Force or contact inputs are the natural addition for the contact phase.
+4. Training options: residual RL with a sparse capture reward (the literature's usual choice), or imitation of a better expert. We have no better expert above the classical limit, which argues for RL or for an expert with privileged information (true pose and rate) teaching a policy that has only sensors.
+
+Sources: https://arxiv.org/abs/1812.03201, https://arxiv.org/abs/2106.04306, https://arxiv.org/pdf/2609.19962, https://arxiv.org/pdf/2506.16685v2, https://arxiv.org/pdf/2606.12406, https://arxiv.org/abs/2303.10812, https://iafastro.directory/iac/archive/browse/IAC-15/A2/4/30115/, https://par.nsf.gov//servlets/purl/10599386
