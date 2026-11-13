@@ -6,7 +6,7 @@ This file records the user's goals, work completed, verified setup, and lessons 
 
 ## Resume here (next session)
 
-**13 Nov, later: P4.3 wrapped up.** Write-ups in SPEC_4 §4.3, SPEC_3 §14.4 (arm2) and LEARNINGS; freeze v1.2 (`e3_espa_freeze.sha256`, all 36 hashes OK; v1.1 kept); Vision Grasp Replay re-exported with the epoch-23 network (`run_p4_replay.sh`; close errors 1.5 and 2.2 mm) and republished. Everything committed on branch `p4.3-and-arm2` (commit 0245e5b) and pushed; not yet merged into `main`. **Next:** arm2 camera scene, small `demos_v3`, retrain on Colab, re-check the estimate grasp (about 25 missions); then P4.4 (LeRobot, ACT).
+**13 Nov, later: P4.3 wrapped up.** Write-ups in SPEC_4 §4.3, SPEC_3 §14.4 (arm2) and LEARNINGS; freeze v1.2 (`e3_espa_freeze.sha256`, all 36 hashes OK; v1.1 kept); Vision Grasp Replay re-exported with the epoch-23 network (`run_p4_replay.sh`; close errors 1.5 and 2.2 mm) and republished. Everything committed on branch `p4.3-and-arm2` (commit 0245e5b), pushed, and fast-forward merged into `main` (13 Nov). **Next:** arm2 camera scene, small `demos_v3`, retrain on Colab, re-check the estimate grasp (about 25 missions); then P4.4 (LeRobot, ACT).
 
 **13 Nov, earlier (stopped here first). Start with this block.**
 - **Colab v2 training finished** (30 epochs, 234 min on a T4). Best epoch 23; validation median / 95th percentile:
