@@ -74,6 +74,9 @@ class Recorder:
 
     def target(self, L):
         ph = L["phase"]
+        pol = self.sim.policy
+        if pol is not None and ph in ("reach", "approach") and pol.last is not None:
+            return pol.last  # P4.4 DART: label = the clean expert target, not the noisy executed one
         if ph in ("approach", "close", "hold"):
             return L["p_des"], L["R_des"]
         if ph in ("settle", "reach"):
@@ -136,7 +139,7 @@ class Recorder:
 _W = {}
 
 
-def _init(img_steps, out):
+def _init(img_steps, out, dart=False):
     import os
     for k in range(20):  # mjorbit compiles via a temp XML next to the scene: parallel workers race
         try:
@@ -149,6 +152,9 @@ def _init(img_steps, out):
     rig = CamRig(sim.km)
     rec = Recorder(sim, rig, img_steps=img_steps)
     sim.step_hook = rec
+    if dart:  # P4.4b: DART noise on the executed target (policies.DartPolicy), clean labels
+        from policies import DartPolicy
+        sim.policy = DartPolicy()
     _W.update(sim=sim, rig=rig, rec=rec, out=Path(out))
 
 
@@ -163,9 +169,13 @@ def _episode(job):
     axis = int(draw.integers(3))
     dr = rig.randomize(draw, holdout_sun=holdout)
     rec.reset()
+    if sim.policy is not None:
+        sim.policy.reset(seed + 777)  # noise draws apart from the case, rendering and sim draws
     t0 = time.time()
     r = sim.run(np.random.default_rng(seed), spin_deg_s=spin, spin_axis=axis)
     meta = dict(seed=seed, spin=spin, axis=axis, dr=dr, wall_s=round(time.time() - t0, 1),
+                dart=sim.policy is not None, scene=SCENE,
+                dart_noise_max_mm=round(getattr(sim.policy, "noise_max", 0.0) * 1000, 2),
                 **{k: r.get(k) for k in ("success", "grasped", "outcome", "aborted", "abort_reason",
                                          "push_dv", "bar_shift_mm", "t_grasp", "collision")})
     if r.get("success") and not r.get("aborted"):
@@ -192,6 +202,8 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--img-steps", type=int, default=25, help="images every N control steps (25 = 0.25 s)")
     ap.add_argument("--holdout-sun", action="store_true", help="sun inside the held-out cone (eval only)")
+    ap.add_argument("--dart", action="store_true", help="P4.4b: DART noise on the executed grip target, "
+                    "clean expert labels (policies.DartPolicy)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out)
@@ -200,7 +212,7 @@ def main():
     jobs = [(base + a.start + i, a.holdout_sun) for i in range(a.n)]
     t0 = time.time()
     log = out / "episodes.jsonl"
-    with Pool(a.workers, initializer=_init, initargs=(a.img_steps, str(out))) as pool, log.open("a") as fh:
+    with Pool(a.workers, initializer=_init, initargs=(a.img_steps, str(out), a.dart)) as pool, log.open("a") as fh:
         for i, m in enumerate(pool.imap_unordered(_episode, jobs, chunksize=1), 1):
             if not m.get("skipped"):
                 fh.write(json.dumps(m, default=float) + "\n")

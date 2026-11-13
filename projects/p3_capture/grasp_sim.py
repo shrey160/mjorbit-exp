@@ -172,6 +172,15 @@ class GraspSim:
         # update(sim, t, phase), bar(sim) -> (p_bar, Rc) and client(sim) -> (p_c, Rc, v_c, w_c),
         # all world frame. Bus station keeping and the E2 monitors keep using the truth.
         self.pose_est = None
+        # P4.4 (SPEC_4 4.4): learned grasp policy (None = the classical expert, a no-op). When
+        # set, policy(sim, t, phase, t_phase) -> (p_des, R_des, close), world frame, is called
+        # every control step in reach and approach and replaces the expert's grip target and
+        # its close test. Reach: target -> warm-started IK -> joint PD; approach: impedance with
+        # the feed-forward from the target's own rate. Close and hold are unchanged (frozen
+        # relative to the client, estimated if pose_est is set). expert_suggest() gives the
+        # expert's target for the current time, from the truth (DART labels, DAgger, hand-over).
+        self.policy = None
+        self._fk = None  # (model, MjData) for expert_suggest's forward kinematics, made on first use
         self.jacp = np.zeros((3, km.nv))
         self.jacr = np.zeros((3, km.nv))
 
@@ -564,6 +573,52 @@ class GraspSim:
         tau = self.jacp[:, ARM].T @ F + self.jacr[:, ARM].T @ M - cfg.kq_null * qv[ARM]
         return tau
 
+    # ---------------------------------------------------------------- P4.4 policy support
+    def expert_suggest(self, t, phase, t_phase):
+        """The classical expert's grip target (world frame) at time t, from the true client
+        pose: reach = forward kinematics of the minimum-jerk joint reference, approach = the
+        blended slide along the bar normal. None in other phases. Same formulas as run()."""
+        cfg, kd = self.cfg, self.kd
+        if phase == "reach":
+            q_start, q_goal = self._reach_q
+            s = min((t - t_phase) / cfg.reach_s, 1.0)
+            sh = 10 * s**3 - 15 * s**4 + 6 * s**5
+            if self._fk is None or self._fk[0] is not self.km:
+                self._fk = (self.km, mujoco.MjData(self.km))
+            fk = self._fk[1]
+            fk.qpos[:] = kd.qpos
+            fk.qpos[ARM_Q] = q_start + sh * (q_goal - q_start)
+            mujoco.mj_kinematics(self.km, fk)
+            return fk.site_xpos[self.sid_grip].copy(), fk.site_xmat[self.sid_grip].reshape(3, 3).copy()
+        if phase == "approach":
+            Rc = kd.xmat[self.bid_target].reshape(3, 3)
+            p_c = kd.xpos[self.bid_target]
+            p_bar, _ = self.site_pose(self.sid_bar)
+            tb = t - t_phase
+            approach_s = min(cfg.pre_contact, cfg.v_approach * max(tb - cfg.blend_s, 0.0))
+            p_des, R_des = p_bar - (cfg.pre_contact - approach_s) * Rc[:, 0], Rc.copy()
+            if tb < cfg.blend_s:
+                sb = tb / cfg.blend_s
+                h = 10 * sb**3 - 15 * sb**4 + 6 * sb**5
+                rel_p, rel_R = self._blend_true
+                p_b, R_b = p_c + Rc @ rel_p, Rc @ rel_R
+                p_des = p_b + h * (p_des - p_b)
+                R_des = Rotation.from_rotvec(h * _rotvec(R_des @ R_b.T)).as_matrix() @ R_b
+            return p_des, R_des
+        return None
+
+    def _policy_step(self, t, phase, t_phase):
+        """Call the policy; returns its target and the target's rate (finite difference)."""
+        p, R, close = self.policy(self, t, phase, t_phase)
+        self._pol_close = bool(close)
+        if self._pol_prev is None:
+            v, w = np.zeros(3), np.zeros(3)
+        else:
+            v = (p - self._pol_prev[0]) / self.cfg.ctrl_dt
+            w = _rotvec(R @ self._pol_prev[1].T) / self.cfg.ctrl_dt
+        self._pol_prev = (p.copy(), R.copy())
+        return p, R, v, w
+
     # ---------------------------------------------------------------- episode
     def run(self, rng=None, record=False, **reset_kw):
         cfg = self.cfg
@@ -590,6 +645,7 @@ class GraspSim:
         vc0 = None
         Rs_ref0 = None
         self._rel_at_grasp = None
+        self._pol_close, self._pol_prev, self._pol_q = False, None, None  # P4.4 policy state
         out["clamp_force"] = np.nan
         trace = [] if record else None
         hold_s = cfg.hold_s
@@ -651,12 +707,14 @@ class GraspSim:
                 q_goal, ep, er = self.ik(p_pre, R_pre, seed)
                 out["ik_err_pos"], out["ik_err_rot"] = ep, er
                 q_start = d.qpos[ARM_Q].copy()
+                self._reach_q = (q_start, q_goal)  # P4.4 expert_suggest
                 phase, t_phase = "reach", t
             elif phase == "reach" and t - t_phase >= cfg.reach_s:
                 phase, t_phase = "approach", t
                 p0, R0 = self.site_pose(self.sid_grip)
                 Rc0 = kd.xmat[self.bid_target].reshape(3, 3)
                 pc0 = kd.xpos[self.bid_target]
+                self._blend_true = (Rc0.T @ (p0 - pc0), Rc0.T @ R0)  # P4.4 expert_suggest
                 if self.pose_est is not None:
                     pc0, Rc0, _, _ = self.pose_est.client(self)
                 self.blend_rel_p = Rc0.T @ (p0 - pc0)
@@ -664,15 +722,19 @@ class GraspSim:
                 vc0 = d.qvel[14:17].copy()
                 Rs_ref0 = kd.xmat[self.bid_chaser].reshape(3, 3).copy()
             elif phase == "approach":
-                p_bar, _ = self.grasp_target(0.0)
-                p_g, _ = self.site_pose(self.sid_grip)
-                Rc = kd.xmat[self.bid_target].reshape(3, 3)
-                if self.pose_est is not None:
-                    _, Rc, _, _ = self.pose_est.client(self)
-                rel = p_g - p_bar
-                along = rel @ Rc[:, 0]
-                perp = np.linalg.norm(rel - along * Rc[:, 0] - (rel @ Rc[:, 1]) * Rc[:, 1])
-                if (abs(along) < 0.01 and perp < 0.01) or t - t_phase > cfg.approach_timeout_s:
+                if self.policy is None:
+                    p_bar, _ = self.grasp_target(0.0)
+                    p_g, _ = self.site_pose(self.sid_grip)
+                    Rc = kd.xmat[self.bid_target].reshape(3, 3)
+                    if self.pose_est is not None:
+                        _, Rc, _, _ = self.pose_est.client(self)
+                    rel = p_g - p_bar
+                    along = rel @ Rc[:, 0]
+                    perp = np.linalg.norm(rel - along * Rc[:, 0] - (rel @ Rc[:, 1]) * Rc[:, 1])
+                    go = abs(along) < 0.01 and perp < 0.01
+                else:  # P4.4: the policy decides when to close (flag from the previous step)
+                    go = self._pol_close
+                if go or t - t_phase > cfg.approach_timeout_s:
                     phase, t_phase = "close", t
                     grip_cmd = np.array([-cfg.grip_squeeze, cfg.grip_squeeze])
                     self._freeze_refs()
@@ -779,6 +841,12 @@ class GraspSim:
             elif phase in ("flyin", "settle", "reach"):
                 if phase in ("flyin", "settle"):
                     q_d, qd_d = self.stow, np.zeros(6)
+                elif self.policy is not None:  # P4.4: policy target -> warm-started IK
+                    p_des, R_des, _, _ = self._policy_step(t, phase, t_phase)
+                    q0 = d.qpos[ARM_Q].copy() if self._pol_q is None else self._pol_q
+                    q_d, _, _ = self.ik(p_des, R_des, q0, iters=50)
+                    qd_d = np.zeros(6) if self._pol_q is None else (q_d - self._pol_q) / cfg.ctrl_dt
+                    self._pol_q = q_d
                 else:
                     s = min((t - t_phase) / cfg.reach_s, 1.0)
                     sh = 10 * s**3 - 15 * s**4 + 6 * s**5
@@ -793,7 +861,9 @@ class GraspSim:
                 vc = d.qvel[14:17]
                 if self.pose_est is not None:
                     p_c, Rc, vc, wc = self.pose_est.client(self)
-                if phase == "approach":
+                if phase == "approach" and self.policy is not None:  # P4.4
+                    p_des, R_des, v_ref, wc = self._policy_step(t, phase, t_phase)
+                elif phase == "approach":
                     tb = t - t_phase
                     approach_s = min(cfg.pre_contact,
                                      cfg.v_approach * max(tb - cfg.blend_s, 0.0))
