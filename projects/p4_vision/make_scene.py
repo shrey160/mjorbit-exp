@@ -70,10 +70,21 @@ def build(arm="espa"):
     rep('<geom name="servicer_bus" type="box"', '<geom name="servicer_bus" material="mat_serv" type="box"')
     # above the open upper jaw (top at z ~0.11), sight line to the grip point passes below it
     wpos, wlook = (-0.03, 0.0, 0.14), (0.35, 0.0, 0.0)
+    # P4.8 (13 Nov) palm_cam: between the jaws, 10 cm behind the grip point, looking along the
+    # approach axis; sees both pads and the bar between them (wrist_cam never sees the pads:
+    # probe_wristcam.py). Image up = closing direction.
+    ppos, plook = (0.03, 0.0, 0.0), (0.35, 0.0, 0.0)
     rep('                  <site name="grip_site" pos="0.13 0 0" size="0.012" rgba="0.1 0.9 0.2 1"/>\n',
         '                  <site name="grip_site" pos="0.13 0 0" size="0.012" rgba="0.1 0.9 0.2 1"/>\n'
         f'                  <camera name="wrist_cam" mode="fixed" pos="{wpos[0]} {wpos[1]} {wpos[2]}"'
-        f' xyaxes="{xyaxes(wpos, wlook)}" fovy="75"/>\n')
+        f' xyaxes="{xyaxes(wpos, wlook)}" fovy="75"/>\n'
+        f'                  <camera name="palm_cam" mode="fixed" pos="{ppos[0]} {ppos[1]} {ppos[2]}"'
+        f' xyaxes="{xyaxes(ppos, plook)}" fovy="90"/>\n'
+        # palm light (13 Nov): near the bar the gripper shadows it and the palm image goes black
+        # (dbg_palm.py); a spot beside the camera, off by default and switched on only while
+        # palm_cam renders (cams.CamRig.render_palm), so every other image is unchanged
+        f'                  <light name="palm_light" active="false" pos="{ppos[0]} {ppos[1]} {ppos[2] + 0.015}"'
+        ' dir="1 0 0" cutoff="70" exponent="1" diffuse="0.9 0.9 0.9" specular="0.2 0.2 0.2" castshadow="false"/>\n')
     bpos, blook = (0.26, 0.20, 0.30), (1.25, 0.0, 0.0)
     lpos = (0.26, 0.20, 0.24)
     rep('      <site name="bus_site" pos="0 0 0" size="0.02"/>\n',

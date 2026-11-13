@@ -27,7 +27,7 @@ KEEP = ("success", "grasped", "outcome", "aborted", "abort_reason", "abort_phase
 _W = {}
 
 
-def _init(mode, ckpt):
+def _init(mode, ckpt, mount_m=None, mount_deg=None, palm_ckpt="", palm_rot=True):
     import os
     import torch
     torch.set_num_threads(1)
@@ -39,19 +39,26 @@ def _init(mode, ckpt):
             if "parse" not in str(e).lower() and "empty" not in str(e).lower():
                 raise
             time.sleep(0.3 + 0.3 * k + 0.05 * (os.getpid() % 10))
-    rig = CamRig(sim.km)  # v2 rig: calibrated mounts, bus 192, lidar 128 (as the demos)
+    # v2 rig: calibrated mounts (1 mm, 0.1 deg), bus 192, lidar 128 (as the demos); P4.8: --mount-m / --mount-deg
+    kw = {k: v for k, v in (('mount_m', mount_m), ('mount_deg', mount_deg)) if v is not None}
+    rig = CamRig(sim.km, **kw)
     est = None
     if mode == "est":
         from pose_est import NetPoseEst
         est = NetPoseEst(ckpt, rig)
+    elif mode == "palm":  # P4.8: v3 estimate for the reach, palm-camera offset in approach
+        from pose_est import PalmPoseEst
+        est = PalmPoseEst(ckpt, palm_ckpt, rig, use_rot=palm_rot)
     _W.update(sim=sim, rig=rig, est=est)
 
 
 def _episode(job):
-    seed, holdout = job
+    seed, holdout, spin_fix = job
     sim, rig, est = _W["sim"], _W["rig"], _W["est"]
     draw = np.random.default_rng(seed + 12345)  # as gen_demos.py
     spin = float(draw.uniform(0.0, 2.0))
+    if spin_fix is not None:  # P4.8 spin sweep: fixed rate, the same axis and rendering draws
+        spin = float(spin_fix)
     axis = int(draw.integers(3))
     dr = rig.randomize(draw, holdout_sun=holdout)
     if est is not None:
@@ -70,6 +77,9 @@ def _episode(job):
                 m[f"est_{ph}_mm"] = float(np.median(e) * 1000)
                 m[f"est_{ph}_deg"] = float(np.median(a))
         m["est_last_mm"] = float(L[-1][2] * 1000)  # at the close command (latched)
+        m["est_last_deg"] = float(L[-1][3])
+    if hasattr(est, "n_palm"):
+        m["n_palm"], m["n_palm_rej"] = est.n_palm, est.n_rej
     return m
 
 
@@ -84,20 +94,25 @@ def wilson(k, n, z=1.96):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=("est", "oracle"), required=True)
+    ap.add_argument("--mode", choices=("est", "oracle", "palm"), required=True)
+    ap.add_argument("--palm-ckpt", default="")
+    ap.add_argument("--palm-no-rot", action="store_true", help="palm position only; rotation from the v3 estimate")
     ap.add_argument("--ckpt", default="")
     ap.add_argument("--split", choices=list(SPLITS), default="validation")
     ap.add_argument("--start", type=int, default=0)
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--workers", type=int, default=20)
     ap.add_argument("--holdout-sun", action="store_true")
+    ap.add_argument("--mount-m", type=float, default=None, help="P4.8: camera mount error, +- m per axis (default 0.001)")
+    ap.add_argument("--mount-deg", type=float, default=None, help="P4.8: camera mount error, +- deg per axis (default 0.1)")
+    ap.add_argument("--spin", type=float, default=None, help="fixed client spin [deg/s] instead of the 0-2 draw")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     base = SPLITS[a.split] * 1000
-    jobs = [(base + a.start + i, a.holdout_sun) for i in range(a.n)]
+    jobs = [(base + a.start + i, a.holdout_sun, a.spin) for i in range(a.n)]
     t0 = time.time()
     ms = []
-    with Pool(a.workers, initializer=_init, initargs=(a.mode, a.ckpt)) as pool:
+    with Pool(a.workers, initializer=_init, initargs=(a.mode, a.ckpt, a.mount_m, a.mount_deg, a.palm_ckpt, not a.palm_no_rot)) as pool:
         for i, m in enumerate(pool.imap_unordered(_episode, jobs, chunksize=1), 1):
             ms.append(m)
             if i % 10 == 0 or i == len(jobs):
@@ -111,7 +126,7 @@ def main():
     k_sim = sum(bool(m["success"]) and not m["aborted"] for m in ms)
     unsafe = sum(bool(m["collision"]) for m in ms)
     from collections import Counter
-    summ = dict(mode=a.mode, ckpt=a.ckpt, split=a.split, n=n, holdout_sun=a.holdout_sun,
+    summ = dict(mode=a.mode, ckpt=a.ckpt, spin_fixed=a.spin, mount_m=a.mount_m, mount_deg=a.mount_deg, outcomes=dict(Counter(m["outcome"] for m in ms)), split=a.split, n=n, holdout_sun=a.holdout_sun,
                 success=ks / n, success_ci95=wilson(ks, n), sim_success=k_sim / n, collisions=unsafe,
                 push_over_limit=sum(m["push_dv"] > PUSH_MAX for m in ms),
                 aborts=dict(Counter(m["abort_reason"] for m in ms if m["aborted"])),

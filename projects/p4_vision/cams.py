@@ -43,6 +43,7 @@ HOLDOUT_AXIS = np.array([0.0, -np.cos(np.radians(50)), np.sin(np.radians(50))])
 HOLDOUT_DEG = 15.0
 CAMS = ("wrist_cam", "bus_cam")
 LIDAR = "bus_lidar"
+PALM_RES = 128  # palm_cam (P4.8), present only in scenes made after 13 Nov
 LIDAR_RES = 128  # pixels per side (Raven's flash lidar: 256 x 256 focal plane array); v1: 64
 LIDAR_MIN, LIDAR_MAX = 0.3, 20.0  # m
 RES = {"wrist_cam": 128, "bus_cam": 192}  # v1: 128 both
@@ -86,6 +87,9 @@ class CamRig:
         self._base = dict(cam_pos=km.cam_pos.copy(), cam_quat=km.cam_quat.copy(),
                           rgba={k: km.geom_rgba[i].copy() for k, i in self.geoms.items()})
         self.dr = {}
+        self.palm_id = cid("palm_cam")  # -1 in scenes without it
+        self.rp = mujoco.Renderer(km, PALM_RES, PALM_RES) if self.palm_id >= 0 else None
+        self.palm_light = mujoco.mj_name2id(km, mujoco.mjtObj.mjOBJ_LIGHT, "palm_light")  # -1 if absent
         # flash lidar: depth render of bus_lidar, converted to range along each pixel's ray
         self.lidar_id = cid(LIDAR)
         assert self.lidar_id >= 0, "scene has no bus_lidar (re-run make_scene.py)"
@@ -134,7 +138,29 @@ class CamRig:
                        gain=self.gain, noise=self.noise, lidar_sig0=self.l_sig0, lidar_drop=self.l_drop,
                        mount_m=self.mount_m, mount_deg=self.mount_deg, res=self.res, lidar_res=self.lres,
                        tint={k: v.tolist() for k, v in tint.items()})
+        if self.palm_id >= 0:
+            # P4.8: the palm camera's mount error and noise stream are drawn last, so every
+            # earlier draw (and so every image of the other sensors) is as before
+            c = self.palm_id
+            km.cam_pos[c] = self._base["cam_pos"][c] + rng.uniform(-self.mount_m, self.mount_m, 3)
+            dq = Rotation.from_rotvec(np.radians(rng.uniform(-self.mount_deg, self.mount_deg, 3)))
+            q = self._base["cam_quat"][c]
+            x, y, z, w = (dq * Rotation.from_quat([q[1], q[2], q[3], q[0]])).as_quat()
+            km.cam_quat[c] = [w, x, y, z]
+            self._prng = np.random.default_rng(int(rng.integers(2**31)))
         return self.dr
+
+    def render_palm(self, kd: mujoco.MjData):
+        """(128, 128, 3) uint8 from palm_cam, with the episode's exposure gain and noise level."""
+        if self.palm_light >= 0:  # the palm spot is lit only for this image
+            self.km.light_active[self.palm_light] = 1
+        self.rp.update_scene(kd, camera=self.palm_id, scene_option=self.opt)
+        img = self.rp.render().astype(np.float32) * self.gain
+        if self.palm_light >= 0:
+            self.km.light_active[self.palm_light] = 0
+        if self.noise > 0:
+            img += self._prng.normal(0.0, self.noise, img.shape)
+        return np.clip(img, 0, 255).astype(np.uint8)
 
     def lidar(self, kd: mujoco.MjData):
         """(LIDAR_RES, LIDAR_RES) uint16 range in mm along each pixel's ray, 0 = no return.
