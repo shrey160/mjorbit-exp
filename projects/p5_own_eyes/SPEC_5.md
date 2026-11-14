@@ -14,8 +14,8 @@ What this changes in the sections below:
 - **Claim:** "fly-in and grasp of a cooperative client on a realistic provided state", not "a client that cannot help".
 
 Revised steps:
-1. P5.1 filter (in progress).
-2. P5.2 monitors on the filter output, with the stale-link monitor.
+1. P5.1 filter (done).
+2. P5.2 monitors on the filter output, with the stale-link monitor (done; fault cases move to P5.5).
 3. P5.3' provided-state model: attitude 0.05°, rate 0.002°/s, position 10–30 mm, velocity 1–3 mm/s, 1–10 Hz, 0.1–0.5 s latency, dropouts of 1–10 s. These figures are placeholders to be checked.
 4. P5.4 closed loop with the arm on the Project 4 estimators.
 5. P5.5 faults.
@@ -30,6 +30,26 @@ Revised steps:
 | 20 mm, 1° | 19/25 | 6 | 17.9 mm / 0.49 mm/s / 0.47° / 0.011°/s | 604 |
 
 No collisions. All aborts are the predicted-clearance monitor during the fly-in. The filter meets the velocity and rate targets at every level; position and attitude are no better than the input, because slow drift cannot be filtered out. So the input must itself meet about 10 mm and 0.5°. The filter is referenced to the servicer's centre of mass, whose acceleration is exactly thrust over mass before contact. After the jaws close the estimate is not valid (reported separately as `post`).
+
+**P5.2 result (14 Nov, `p5_mon_est.json`):** bus and monitors on the filter.
+
+*Cause of the aborts (`dbg_clear.py`).* On the true state the frozen fly-in plan leaves the predicted-clearance monitor only 0.03 m: 174 s into the 219 s path the servicer still closes at about 20 mm/s, and a 30 s coast would end 0.03 m above the limit. The true clearance at that moment is 0.66 m. So 3 cm of tracking error trips the monitor. A second cause at slow spin: the spin axis is estimated up to 15° off, the re-planned path gets a short, fast last leg, and that leg alone violates the monitor. No traced abort was a real small clearance.
+
+*Design.*
+1. After the re-plan each leg is lengthened until the path alone keeps a predicted-clearance margin equal to the allowance plus 0.08 m for tracking error (capped at 0.26 m; the pre-grasp point has 0.30 m).
+2. The monitors read the estimate. The predicted clearance loses an allowance of 3 × (σ position + 30 s × σ velocity + 1.1 m × (σ attitude + 30 s × σ rate)). The filter's σ is used, with the stated input accuracy added for position and attitude, because slow drift is not averaged out.
+3. New `stale_link` abort when the newest client state is older than 3 s.
+4. The monitors are armed at the end of the 30 s wait, when the filter has converged.
+
+| Input error | Grasps (P5.1 → P5.2) | Aborts | Allowance at close range | Path margin | Smallest monitor value |
+|---|---|---|---|---|---|
+| 5 mm, 0.25° | 25/25 → 25/25 | 0 | 0.07 m | 0.12 m | 0.11 m |
+| 10 mm, 0.5° | 24/25 → 25/25 | 0 | 0.14 m | 0.17 m | 0.12 m |
+| 20 mm, 1° | 19/25 → 25/25 | 0 | 0.29 m | 0.25 m | 0.07 m |
+
+No collisions; push at most 0.60 mm/s. Fly-ins along the spin axis take 1.52 times longer (219 s → about 330 s); propellant is unchanged. Link dropout at 10 mm, 4 seeds each: 1 s gives 4/4 grasps; 6 s gives 4/4 `stale_link` safe aborts, also when it starts near the end of the fly-in.
+
+Open: the fault cases with the monitors on the estimate (P5.5) must show the allowance has not hidden real faults; the abort back-off still reads the true client state.
 
 Later extensions, simplest first: the same client but silent (state from the servicer's own camera and lidar; the original plan below) → faster spin and nutation → a client with no bar (grab the launch adapter ring).
 
