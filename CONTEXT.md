@@ -30,9 +30,10 @@ This file records the user's goals, work completed, verified setup, and lessons 
 
 **Answered by the user on 13 Nov, night ("yeah, go ahead"):**
 - **Commit: done** on branch `p4.8-palm-camera-and-demo` (three commits: ACT pipeline and negative result; palm-camera correction; demo and docs). Not pushed and not merged into `main`: ask.
-- **Stray files:** there are 276 `.case_*.xml` (11–13 Nov) plus `.demo_release.xml` in `projects/p3_capture`, not the "about ten" I had told the user, so I asked again before deleting. All are gitignored, regenerated on every run, and no job was running. Check the user's answer before deleting.
-- **Next project:** taken as "own eyes" (P5, Step 3 below), the first option and my recommendation; the user did not pick explicitly, so confirm at the start.
-- Step 1.1 is therefore done; Step 1.2 waits on the answer; Step 1.3 (guide) is open.
+- **Stray files:** there are 276 `.case_*.xml` (11–13 Nov) plus `.demo_release.xml` in `projects/p3_capture`, not the "about ten" I had told the user, so I asked again before deleting. All are gitignored, regenerated on every run, and no job was running. **The user confirmed ("Yes, delete all") and all 277 were deleted on 13 Nov, night.**
+- **Next project: "own eyes" (P5, Step 3), confirmed by the user on 14 Nov** ("yes own eyes is next one").
+- Steps 1.1 and 1.2 are done; Step 1.3 (guide) is open.
+- **14 Nov: the user asked to push and merge.** Branch `p4.8-palm-camera-and-demo` was pushed and fast-forwarded into `main`, and `main` was pushed to `origin`.
 
 **13 Nov, evening (superseded by the plan above and the "13 Nov, night" block below): ACT closed-loop results.**
 - **State:** P4.4 ACT closed loop works mechanically but grasps poorly. 20k checkpoint: **3/25** temporal ensembling, **2/25** chunk execution (re-plan every 20 frames), **5/25 hybrid** (classical reach + ACT approach and close). The oracle and P4.3 are 25/25. 0 collisions; E2 aborted every bad episode. The shadow run proves the wrapper is correct.
