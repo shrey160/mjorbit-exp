@@ -50,6 +50,7 @@ class FiltEst:
         self.k, self.q, self.out = 0, [], None
         self.err = {g: dict(n=0, p2=0.0, v2=0.0, a2=0.0, w2=0.0, pm=0.0, vm=0.0, am=0.0, wm=0.0) for g in GROUPS}
         self.nis = []
+        self.z_override = None
         self.last_upd = 0  # control step of the last measurement update
 
     def age(self):
@@ -77,7 +78,10 @@ class FiltEst:
         else:
             f.push(-np.asarray(d.ctrl[0:3], float) / sim.m_serv)  # thrust commanded over the last step
             if self.k % self.every == 0 and not drop:  # drop: the link is down, nothing arrives
-                self.q.append((self.k + self.lat, *self._measure(rho, Rc)))
+                z, Rm, sp = self._measure(rho, Rc)
+                if self.z_override is not None:  # P5.4: position from the servicer's cameras
+                    z, sp = self.z_override
+                self.q.append((self.k + self.lat, z, Rm, sp))
             while self.q and self.q[0][0] <= self.k:
                 _, z, Rm, sp = self.q.pop(0)
                 f.update(z, Rm, sp, self.ma, self.lat)
@@ -103,6 +107,7 @@ class FiltSim(TolSim):
     slow = 0.5
     latency = 0.15
     fkw: dict = {}
+    ekw: dict = {}  # measurement model: every (control steps per message), tau_b, r_ref
     filt_est = None
     # P5.2: monitors on the estimate
     mon_est = False
@@ -117,7 +122,7 @@ class FiltSim(TolSim):
         self.cond = None
         super().reset(rng, **kw)
         self.filt_est = FiltEst(self, *self.meas, self.slow, self.latency,
-                                np.random.default_rng([self.noise_seed, 78]), **self.fkw)
+                                np.random.default_rng([self.noise_seed, 78]), **self.ekw, **self.fkw)
         self.est = self.filt_est if self.closed else None
         self._pre = self.preroll if (self.closed and self.flyin_path is not None) else 0.0
         self.pre_out = {}
@@ -131,11 +136,16 @@ class FiltSim(TolSim):
     def sync(self):
         GraspSim.sync(self)
         if self.filt_est is not None:
+            self._before_filter()
             fly = getattr(self, "flyin_path", None) is not None and self._flyin_t is not None
             pre = self._pre > 0 if self.closed else self.filt_est.k * self.cfg.ctrl_dt < self.preroll
             post = getattr(self, "_ph", "") in ("close", "hold", "abort", "done")  # jaws on the bar: other dynamics
             dr = self.drop is not None and self.drop[0] <= self._fly_clock < self.drop[0] + self.drop[1]
+            dr = dr or getattr(self, "_meas_off", False)
             self.filt_est.step(self, "preroll" if pre else ("flyin" if fly else ("post" if post else "prox")), dr)
+
+    def _before_filter(self):
+        pass
 
     def allowance(self, rng=None):
         """Uncertainty allowance on the predicted clearance [m]: k_sig x (position + horizon x
@@ -149,7 +159,9 @@ class FiltSim(TolSim):
         sp = float(np.hypot(sp, fe.mp * max(rng / fe.r_ref, 1.0)))
         sa = float(np.hypot(sa, fe.ma))
         H = self.horizon
-        return self.k_sig * (sp + H * sv + CLIENT_RADIUS * (sa + H * sw))
+        # independent errors: root-sum-square (the linear sum used in the first P5.2 run exceeded
+        # the 0.30 m the pre-grasp point has, at a 60 mm link)
+        return self.k_sig * float(np.sqrt(sp**2 + (H * sv) ** 2 + (CLIENT_RADIUS * sa) ** 2 + (CLIENT_RADIUS * H * sw) ** 2))
 
     def _leg_cp(self, fp, w_b, i):
         """Smallest predicted free-drift clearance along leg i of path fp, for a servicer
@@ -198,7 +210,7 @@ class FiltSim(TolSim):
         if self.mon_est:
             # the planned path must leave the monitor its allowance plus a tracking budget
             # (the frozen plan leaves 0.03 m; the pre-grasp point itself has 0.30 m)
-            margin = min(self.allowance(rng=2.5) + self.track_budget, 0.26)
+            margin = min(self.allowance(rng=2.5) + self.track_budget, 0.24)
             self.pre_out.update(path_margin=margin, path_slow=self._slow_path(self.flyin_path, Re.T @ we, margin),
                                 path_s=self.flyin_path.total)
 
@@ -262,12 +274,18 @@ def _init(scene, a):
             time.sleep(0.3 + 0.3 * k + 0.05 * (os.getpid() % 10))
     sim.closed, sim.preroll, sim.slow, sim.latency = a["closed"], a["preroll"], a["slow"], a["latency"]
     sim.fkw = dict(sig_a=a["sig_a"], sig_w=a["sig_w"])
+    sim.ekw = dict(tau_b=a["tau_b"], r_ref=2.7 if a["range_scale"] else 1e9)
     sim.mon_est, sim.k_sig, sim.stale_s, sim.drop = a["mon"] == "est", a["k_sig"], a["stale"], a["drop"]
     _W["sim"] = sim
 
 
 def _episode(job):
-    name, (mp, ma), seed = job
+    name, cond, seed = job
+    sim = _W["sim"]
+    mp, ma = cond[0], cond[1]
+    if len(cond) >= 4:  # per-condition message rate [Hz] and latency [s]
+        sim.ekw = dict(sim.ekw, every=max(int(round(1.0 / (cond[2] * sim.cfg.ctrl_dt))), 1))
+        sim.latency = cond[3]
     sim = _W["sim"]
     c = case_draws(seed, 0.0)
     sim.meas = (mp * 1e-3, np.radians(ma))
@@ -320,7 +338,7 @@ def summarise(name, cond, rows):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--loop", choices=("open", "closed"), required=True)
-    ap.add_argument("--conds", nargs="+", required=True, help="name:meas_pos_mm,meas_att_deg")
+    ap.add_argument("--conds", nargs="+", required=True, help="name:meas_pos_mm,meas_att_deg[,rate_hz,latency_s]")
     ap.add_argument("--n", type=int, default=25)
     ap.add_argument("--start", type=int, default=0)
     ap.add_argument("--workers", type=int, default=8)
@@ -329,6 +347,8 @@ def main():
     ap.add_argument("--slow", type=float, default=0.5, help="fraction of the error variance that drifts slowly")
     ap.add_argument("--sig-a", type=float, default=2e-5, help="filter: acceleration noise [m/s^2/sqrt(Hz)]")
     ap.add_argument("--sig-w", type=float, default=5e-6, help="filter: rate random walk [rad/s/sqrt(s)]")
+    ap.add_argument("--tau-b", type=float, default=5.0, help="correlation time of the slow error [s]")
+    ap.add_argument("--no-range-scale", action="store_true", help="position error does not grow with range")
     ap.add_argument("--mon", choices=("truth", "est"), default="truth", help="what the E2 monitors read")
     ap.add_argument("--k-sig", type=float, default=3.0, help="clearance allowance in sigmas (--mon est)")
     ap.add_argument("--stale", type=float, default=3.0, help="stale-link abort threshold [s] (--mon est)")
@@ -339,7 +359,7 @@ def main():
     conds = [(s.split(":")[0], tuple(float(x) for x in s.split(":")[1].split(","))) for s in a.conds]
     jobs = [(name, cond, TUNE + a.start + i) for name, cond in conds for i in range(a.n)]
     cfg = dict(closed=a.loop == "closed", preroll=a.preroll, slow=a.slow, latency=a.latency, sig_a=a.sig_a,
-               sig_w=a.sig_w, mon=a.mon, k_sig=a.k_sig, stale=a.stale,
+               sig_w=a.sig_w, tau_b=a.tau_b, range_scale=not a.no_range_scale, mon=a.mon, k_sig=a.k_sig, stale=a.stale,
                drop=tuple(float(x) for x in a.drop.split(",")) if a.drop else None)
     t0 = time.time()
     rows = []

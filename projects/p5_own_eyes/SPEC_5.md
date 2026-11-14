@@ -16,7 +16,7 @@ What this changes in the sections below:
 Revised steps:
 1. P5.1 filter (done).
 2. P5.2 monitors on the filter output, with the stale-link monitor (done; fault cases move to P5.5).
-3. P5.3' provided-state model: attitude 0.05°, rate 0.002°/s, position 10–30 mm, velocity 1–3 mm/s, 1–10 Hz, 0.1–0.5 s latency, dropouts of 1–10 s. These figures are placeholders to be checked.
+3. P5.3' provided-state model (figures checked 14 Nov, RESEARCH_SERVICING.md "Provided state"): position from relative GNSS, 20 mm per axis in a good case and 60 mm per axis (10 cm 3D rms) as the realistic onboard figure, slowly varying and not growing with range; attitude from the client's star tracker, 0.05° (0.1° poor case, including bar alignment); 1–5 Hz; 0.15–0.5 s late (rate and latency are assumptions). Velocity and rate come from the filter, not the link.
 4. P5.4 closed loop with the arm on the Project 4 estimators.
 5. P5.5 faults.
 6. P5.6 test split, once.
@@ -50,6 +50,29 @@ No collisions. All aborts are the predicted-clearance monitor during the fly-in.
 No collisions; push at most 0.60 mm/s. Fly-ins along the spin axis take 1.52 times longer (219 s → about 330 s); propellant is unchanged. Link dropout at 10 mm, 4 seeds each: 1 s gives 4/4 grasps; 6 s gives 4/4 `stale_link` safe aborts, also when it starts near the end of the fly-in.
 
 Open: the fault cases with the monitors on the estimate (P5.5) must show the allowance has not hidden real faults; the abort back-off still reads the true client state.
+
+**P5.3' result (14 Nov, `p5_link.json`):** provided-state input (error per axis, 90% slowly drifting over 60 s, not growing with range), bus and monitors on the filter, arm on the true state, 25 tune seeds.
+
+| Link case | Grasps | Filter position error (3D rms) | Bus off its true station (rms) | Allowance |
+|---|---|---|---|---|
+| Good: 20 mm, 0.05°, 5 Hz, 0.15 s late | 25/25 | 33 mm | 35 mm | 0.08 m |
+| Realistic: 60 mm, 0.05°, 1 Hz, 0.3 s late | 23/25 | 82 mm | 94 mm | 0.29 m |
+| Poor: 60 mm, 0.1°, 1 Hz, 0.5 s late | 23/25 | 82 mm | 98 mm | 0.29 m |
+
+No collisions. Attitude, rate, message rate and latency are not the limit; position is. At 60 mm per axis one case had the bus 0.17 m off station and aborted during close with a 12.9 mm/s push on the client, and one near-static client had its fly-in slowed to the 4× cap and ran out of time. So the requirement on the link is about 20 mm per axis, or the servicer's own cameras must correct the bus position at close range. That correction is the main task of P5.4.
+
+**P5.4 result (14 Nov, `cam_eval.py`, `p5_cam_nofix.json`, `p5_cam_fix.json`):** the whole chain on the servicer's own information. Bus and monitors on the link filter, arm on the Project 4 estimators (camera mounts ±10 mm, 1°), 25 tune seeds per row.
+
+*Hand-over.* Two seconds after the cameras first see the bar, the filter's position input switches from the link to the camera-derived client position; attitude stays on the link. The filter state is shifted at once and the opposite offset is added to its output and removed at 3 mm/s, so the bus moves over slowly. The servicer waits until the offset is gone, then reaches. At the close command position updates stop.
+
+| Link | Hand-over | Grasps | Largest push | Bus off its true station at close (median / max) | Wait before reach |
+|---|---|---|---|---|---|
+| Good: 20 mm, 5 Hz | no | 25/25 | 0.90 mm/s | 37 / 73 mm | 2 s |
+| Good: 20 mm, 5 Hz | yes | 25/25 | 0.84 mm/s | 17 / 48 mm | 40 s |
+| Realistic: 60 mm, 1 Hz | no | 20/25 | 7.70 mm/s | 124 / 204 mm | 2 s |
+| Realistic: 60 mm, 1 Hz | yes | 23/25 | 0.84 mm/s | 18 / 50 mm | 74 s |
+
+No collisions. The hand-over removes every grasp-phase failure. The two failures left at 60 mm happen in the fly-in, before the cameras see the bar: a near-static client whose path is slowed until the run times out, and one predicted-clearance abort (the path margin of 0.23 m minus the allowance of 0.15 m leaves 0.08 m, which a 60 mm link uses up). Changes to the monitor allowance made here: the four terms are combined as a root-sum-square, and k = 2 (the monitor already carries a 0.30 m margin). The P5.2 table above used the linear sum and k = 3.
 
 Later extensions, simplest first: the same client but silent (state from the servicer's own camera and lidar; the original plan below) → faster spin and nutation → a client with no bar (grab the launch adapter ring).
 
