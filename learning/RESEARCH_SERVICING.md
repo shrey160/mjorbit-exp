@@ -379,3 +379,56 @@ Short pass from search summaries (abstracts only, full papers not read). Questio
 4. Training options: residual RL with a sparse capture reward (the literature's usual choice), or imitation of a better expert. We have no better expert above the classical limit, which argues for RL or for an expert with privileged information (true pose and rate) teaching a policy that has only sensors.
 
 Sources: https://arxiv.org/abs/1812.03201, https://arxiv.org/abs/2106.04306, https://arxiv.org/pdf/2609.19962, https://arxiv.org/pdf/2506.16685v2, https://arxiv.org/pdf/2606.12406, https://arxiv.org/abs/2303.10812, https://iafastro.directory/iac/archive/browse/IAC-15/A2/4/30115/, https://par.nsf.gov//servlets/purl/10599386
+
+## P5 research (14 Nov 2026): the servicer body's own estimate of the client
+
+Short pass from search summaries (abstracts only, full papers not read). Question: what accuracy do real relative-navigation sensors and filters reach at close range, and how is a spinning client's rate estimated?
+
+**What flown and tested sensors deliver:**
+- Orbital Express, AVGS (a laser sensor that tracks retro-reflectors fitted to the client, so a *cooperative* client): requirement inside the docking box about ±12 mm in range and laterally, ±0.13° roll and ±0.2° pitch and yaw, reported at 5 Hz with under 175 ms latency. Used from about 120 m in to docking. Figures differ slightly between NASA papers (one says ±15 mm).
+- Camera plus neural network on a client with no markers (Park and D'Amico, arXiv 2206.03796): the SPNv2 network feeds an unscented Kalman filter whose noise settings adapt online. Reported steady-state error on real test-bench images: below 10 cm in position and around 1° in attitude, at under 10 m. The network was trained on synthetic images only.
+- Earlier single-image networks (Sharma and D'Amico, arXiv 1906.09868): centimetre-level position and degree-level attitude on synthetic images, worse on real ones.
+
+**Estimating the spin:**
+- A filter on the attitude kinematics alone (multiplicative extended Kalman filter, de Almeida, Zanetti, Mortari and Akella, AAS 18-420) estimates the client's angular velocity from a sequence of pose measurements. It needs no knowledge of the client's inertia; the process noise acts as a forgetting factor and has to be tuned to how fast the rate changes.
+- Cameras and lidar do not measure angular velocity directly and update more slowly than a gyro (Politecnico di Milano study), so the rate always comes from a filter and lags.
+- With more work the inertia ratios and centre of mass can be estimated as well (DLR; ESA SDC9 paper 278), using conservation of angular momentum. A motion prior speeds up convergence.
+
+**What this means for P5:**
+1. Reasonable targets for an estimator on the bus camera and lidar: a few centimetres and about 1° at 8 m, improving to about 1 cm and a few tenths of a degree at the pre-grasp point. Latency of 0.1–0.2 s and a 5–10 Hz measurement rate are normal.
+2. The rate comes from a kinematic filter on the pose sequence. Our client nutates (its rate vector drifts by about 10% over a fly-in), so the filter needs a rate random-walk term, as in AAS 18-420.
+3. Our client has no markers. If accuracy falls short, markers on the client are the standard remedy for a client that was prepared for servicing.
+4. Measure first how much error and delay our station keeping, fly-in and monitors tolerate, so the estimator has a number to meet.
+
+Gaps: no measured on-orbit error statistics were found for Orbital Express, the Mission Extension Vehicle, TriDAR or ADRAS-J.
+
+Sources: https://ntrs.nasa.gov/api/citations/20080048264/downloads/20080048264.pdf, https://ntrs.nasa.gov/api/citations/20070035123/downloads/20070035123.pdf, https://arxiv.org/abs/2206.03796, https://arxiv.org/abs/1906.09868, https://sites.utexas.edu/near/files/2022/05/AAStemplatev2_0_6_FullPaper_MMAA_01.pdf, https://re.public.polimi.it/retrieve/e0c31c0e-5410-4599-e053-1705fe0aef77/PESCV_OA_01-19.pdf, https://conference.sdo.esoc.esa.int/proceedings/sdc9/paper/278/SDC9-paper278.pdf
+
+## Client types (14 Nov 2026): what a servicer could meet
+
+Short pass from search summaries (abstracts and news reports only). Asked by the user after choosing a cooperative client as the simple first version of Project 5.
+
+**Two separate questions describe a client** (Aerospace Corporation, Center for Space Policy and Strategy; NASA ISAM State of Play):
+- **Cooperative or not:** does it exchange status data with the servicer (over a crosslink or through the ground) and hold its attitude? The sources stress this is a spectrum, not two boxes.
+- **Prepared or not:** was it built with features for servicing (a grapple fixture or docking plate, markers, a refuelling port)?
+
+| Type | Talks to the servicer | Has a grapple feature | Motion | Examples |
+|---|---|---|---|---|
+| A. Cooperative, prepared | yes | yes | attitude held, near zero rate | Orbital Express (2007); future satellites with Astroscale docking plates, Altius DogTags (flown on OneWeb), Orbit Fab RAFTI or Northrop PRM refuelling ports |
+| B. Cooperative, unprepared | yes | no (the servicer grabs the launch adapter ring or the apogee engine nozzle) | attitude held | MEV-1 and Intelsat 901 (2020): the client was alive, moved itself to a meeting orbit and held still |
+| C. Non-cooperative, prepared | no | yes | slow tumble likely | a dead satellite that carries a docking plate (ELSA-M's planned OneWeb client) |
+| D. Non-cooperative, unprepared | no | no | anything from gravity-gradient stable to tumbling | dead legacy satellites, rocket bodies (ADRAS-J and the H-IIA stage, Envisat) |
+
+**Notes that matter for us:**
+- **Our client so far is closest to type C:** it has a grapple bar (prepared) but we treated it as silent and spinning at up to 2°/s. The simple version chosen now is **type A**: it also reports its own state.
+- **A live client is usually asked to hold still** (MEV-1). A type A client that keeps spinning is unusual; it fits a satellite that is spin-stabilised or has lost attitude control but still has power and a radio.
+- **Dead satellites do spin.** An ESA presentation says non-operational satellites in low orbit often exceed 2°/s; at geostationary altitude the spin changes over months and years (sunlight torque), between steady spin and tumbling. Our 2°/s limit covers the slow end only.
+- **Even a "stable" dead object surprises.** ADRAS-J found its rocket stage almost static (a slow libration), yet two close approaches (at 50 m and about 15 m) aborted on unexpected relative-attitude readings. Monitors on the relative state are needed whatever the client type.
+- **Unprepared clients are grabbed by what every satellite has:** the launch adapter (Marman) ring (DARPA RSGS tool) or the apogee engine nozzle (MEV). A bar-specific gripper would not apply there.
+- **Standards are arriving:** docking plates and refuelling ports are being fitted to new satellites (Airbus ordered over 100 Astroscale plates; the US Space Force accepted RAFTI and PRM), so type A and C clients will become common.
+
+**Order of extension for us (simplest first):** A (provided state, grapple bar) → C (same bar, state from the servicer's own camera and lidar; markers on the bar or plate help) → faster spin and nutation → D (no bar: grab the adapter ring; needs a new gripper and the full camera pose network).
+
+Gaps: no ELSA-d or ClearSpace-1 results were found; Envisat's measured rate was not retrieved.
+
+Sources: https://csps.aerospace.org/sites/default/files/2021-08/Davis-Mayberry-Penn_OOS_04242019.pdf, https://ntrs.nasa.gov/api/citations/20260008638/downloads/ISAM_State_of_Play_2026.pdf, https://spaceflightnow.com/2020/04/21/aging-intelsat-satellite-resumes-operations-after-docking-of-robotic-servicer/, https://aviationweek.com/aerospace/commercial-space/astroscale-launches-docking-plate-satellite-removal, https://news.satnews.com/2021/01/14/altius-space-machines-dogtags-grapple-fixtures-launch-aboard-oneweb-sats, https://www.orbitfab.com/news/rafti-preferred-standard/, https://www.airandspaceforces.com/refueling-satellites-space-force-choices/, https://www.darpa.mil/research/programs/robotic-servicing-of-geosynchronous-satellites, https://conference.sdo.esoc.esa.int/proceedings/sdc8/paper/97/SDC8-paper97.pdf, https://indico.esa.int/event/450/contributions/8894/attachments/5664/9420/The%20puzzling%20dynamic%20evolution_Alain%20BENOIT_19%20Oct%202023_version%203.pdf, https://conference.sdo.esoc.esa.int/proceedings/sdc9/paper/171/SDC9-paper171.pdf, https://www.theregister.com/2024/07/10/astroscale_debris_avoidance/
