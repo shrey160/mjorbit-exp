@@ -40,7 +40,8 @@ GROUPS = ("preroll", "flyin", "prox", "post")
 
 
 class FiltEst:
-    def __init__(self, sim, mp, ma, slow, latency, rng, every=10, tau_b=5.0, r_ref=2.7, **fkw):
+    def __init__(self, sim, mp, ma, slow, latency, rng, every=10, tau_b=5.0, r_ref=2.7, tide=False, **fkw):
+        self.tide = tide
         self.dt = sim.cfg.ctrl_dt
         self.f = RelFilter(self.dt, **fkw)
         self.mp, self.ma, self.slow, self.rng = mp, ma, slow, rng
@@ -76,15 +77,22 @@ class FiltEst:
             z, Rm, sp = self._measure(rho, Rc)
             f.init(z, Rm, sp, self.ma, v0=v + 1e-3 * self.rng.normal(size=3))  # far-approach nav: 1 mm/s
         else:
-            f.push(-np.asarray(d.ctrl[0:3], float) / sim.m_serv)  # thrust commanded over the last step
+            a_in = -np.asarray(d.ctrl[0:3], float) / sim.m_serv  # thrust commanded over the last step
+            if self.tide:  # differential gravity on the relative position (world axes are inertial,
+                th = sim.n * float(kd.time)  # centred on the reference orbit; radial = x at t = 0)
+                u = np.array([np.cos(th), np.sin(th), 0.0])
+                r_e = f.now()[0]
+                a_in = a_in - sim.n**2 * (r_e - 3.0 * (r_e @ u) * u)
+            f.push(a_in)
             if self.k % self.every == 0 and not drop:  # drop: the link is down, nothing arrives
                 z, Rm, sp = self._measure(rho, Rc)
-                if self.z_override is not None:  # P5.4: position from the servicer's cameras
+                link = self.z_override is None
+                if not link:  # P5.4: position from the servicer's cameras
                     z, sp = self.z_override
-                self.q.append((self.k + self.lat, z, Rm, sp))
+                self.q.append((self.k + self.lat, z, Rm, sp, link))
             while self.q and self.q[0][0] <= self.k:
-                _, z, Rm, sp = self.q.pop(0)
-                f.update(z, Rm, sp, self.ma, self.lat)
+                _, z, Rm, sp, link = self.q.pop(0)
+                f.update(z, Rm, sp, self.ma, self.lat, biased=link)
                 self.nis.append((f.nis_p, f.nis_a))
                 self.last_upd = self.k
         self.k += 1
@@ -116,6 +124,12 @@ class FiltSim(TolSim):
     stale_s = 3.0  # abort when the newest client state is older than this
     drop = None  # (start s after the fly-in begins, duration s): link dropout
     horizon = 30.0
+    # P5.5: abort when the attitude innovation of a link message is this many times its expected
+    # square (3 if consistent). A client kick shows here within one or two messages, long before
+    # the filter's rate has followed it. 0: record only.
+    nis_abort = 0.0
+    nis_a_max = 0.0
+    abort_est = False  # P5.5b: the abort back-off reads the estimate, not the true client state
 
     def reset(self, rng=None, **kw):
         self.filt_est = None
@@ -128,6 +142,8 @@ class FiltSim(TolSim):
         self.pre_out = {}
         self.mon_noisy = self.mon_est and self.closed
         self._cp_allow, self.allow_max, self.cp_min, self._fly_clock = 0.0, 0.0, np.inf, 0.0
+        self.nis_a_max = 0.0
+        self.abort_info = {}
         if self.closed and self.flyin_path is not None:
             # run() sizes its time limit from this path; the path is re-planned (and may be
             # slowed) after the wait, so leave room. It is only an upper bound.
@@ -147,6 +163,57 @@ class FiltSim(TolSim):
     def _before_filter(self):
         pass
 
+    def _hook(self, loc):
+        super()._hook(loc)
+        ab = loc.get("abort")
+        if (self.abort_est and ab and not ab.get("_est") and self.closed and self.filt_est is not None
+                and self.filt_est.out is not None):
+            self._abort_to_est(ab, loc)
+
+    def _abort_to_est(self, ab, loc):
+        """Rebuild the abort action (frozen GraspSim.run builds it from the true client state) from
+        the estimate. Called from the step hook in the step the abort starts, before the first
+        back-off command."""
+        from safety import AbortRef
+        kd, d, sim = self.kd, self.data, self
+        pe, Re, ve, _ = self.filt_est.out
+        ps, vs = kd.xpos[self.bid_chaser].copy(), np.array(d.qvel[0:3])
+        mc = loc["mon"].cfg
+        ar = AbortRef(ps - pe, vs - ve, mc.r_safe, mc.a_max)
+
+        def ref(tt):
+            # run() forms  F = m a - kp (ps - pc_true - r) - kd (vs - vc_true - v).  Adding
+            # (estimate - truth) to r and v cancels the true client state out of that law, so the
+            # thrust is exactly the one computed from the estimate.
+            r, v, a = ar(tt)
+            pe_, _, ve_, _ = sim.filt_est.out
+            return r + (pe_ - sim.kd.xpos[sim.bid_target]), v + (ve_ - sim.data.qvel[14:17]), a
+
+        ab["ref"], ab["_est"] = ref, True
+        pc_t = kd.xpos[self.bid_target]
+        self.abort_info = dict(on_est=True, est_err_mm=1e3 * float(np.linalg.norm(pe - pc_t)),
+                               est_verr_mm_s=1e3 * float(np.linalg.norm(ve - d.qvel[14:17])))
+        out = loc["out"]
+        Rs_ = kd.xmat[self.bid_chaser].reshape(3, 3).copy()
+        if out.get("abort_reason") == "thr_resid" and mc.reorient and "fault_axis_isolated" in out:
+            # as in run(): turn the faulty axis normal to the back-off plane, from the estimate
+            r_, v_ = ps - pe, vs - ve
+            a_ = Rs_[:, out["fault_axis_isolated"]]
+            nrm = np.cross(r_, v_)
+            if np.linalg.norm(nrm) < 1e-3 * np.linalg.norm(r_) * max(np.linalg.norm(v_), 1e-9):
+                nrm = np.cross(r_, a_)
+            nrm /= np.linalg.norm(nrm)
+            nrm = nrm if a_ @ nrm >= 0 else -nrm
+            ax_ = np.cross(a_, nrm)
+            ang = float(np.arctan2(np.linalg.norm(ax_), a_ @ nrm))
+            ab["R0"] = Rotation.from_rotvec(ang * ax_ / np.linalg.norm(ax_)).as_matrix() @ Rs_                 if np.linalg.norm(ax_) > 1e-9 else Rs_
+        pose = getattr(self, "pose_est", None)
+        if pose is not None and getattr(pose, "p_b", None) is not None:
+            # gripper retract direction from the arm cameras' bar estimate and the link attitude
+            g = ab["pg0"] - pose.bar(self)[0]
+            u = -Re[:, 0] + g / max(np.linalg.norm(g), 1e-6)
+            ab["u_out"] = u / np.linalg.norm(u)
+
     def allowance(self, rng=None):
         """Uncertainty allowance on the predicted clearance [m]: k_sig x (position + horizon x
         velocity + client radius x (attitude + horizon x rate)), 1-sigma each. Position and
@@ -156,7 +223,8 @@ class FiltSim(TolSim):
         sp, sv, sa, sw = fe.f.sigma()
         if rng is None:
             rng = float(np.linalg.norm(fe.out[0] - self.kd.xpos[self.bid_chaser]))
-        sp = float(np.hypot(sp, fe.mp * max(rng / fe.r_ref, 1.0)))
+        if fe.f.nx == 6:  # with the drift state the filter's own sigma already carries the slow error
+            sp = float(np.hypot(sp, fe.mp * max(rng / fe.r_ref, 1.0)))
         sa = float(np.hypot(sa, fe.ma))
         H = self.horizon
         # independent errors: root-sum-square (the linear sum used in the first P5.2 run exceeded
@@ -252,6 +320,12 @@ def _check(self, sim, phase, t, F_raw, grasped, hits):
             and sim.filt_est.age() > sim.stale_s:
         self.first.setdefault("stale_link", (t, phase))
         return "stale_link"
+    if on and not grasped and phase in ("flyin", "settle", "reach", "approach"):
+        nis = sim.filt_est.f.nis_a
+        sim.nis_a_max = max(sim.nis_a_max, nis)
+        if not why and sim.nis_abort > 0 and nis > sim.nis_abort:
+            self.first.setdefault("nav_anom", (t, phase))
+            return "nav_anom"
     return why
 
 

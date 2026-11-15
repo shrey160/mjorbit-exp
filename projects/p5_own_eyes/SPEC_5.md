@@ -74,6 +74,38 @@ No collisions. Attitude, rate, message rate and latency are not the limit; posit
 
 No collisions. The hand-over removes every grasp-phase failure. The two failures left at 60 mm happen in the fly-in, before the cameras see the bar: a near-static client whose path is slowed until the run times out, and one predicted-clearance abort (the path margin of 0.23 m minus the allowance of 0.15 m leaves 0.08 m, which a 60 mm link uses up). Changes to the monitor allowance made here: the four terms are combined as a root-sum-square, and k = 2 (the monitor already carries a 0.30 m margin). The P5.2 table above used the linear sum and k = 3.
 
+**P5.4b result (15 Nov, `p5_cam_fix_lim.json`, `p5_cam_fix_lim2.json`): the two fly-in failures are fixed, 25/25 at both links.** A trace (`dbg_fly.py`) showed the cause was not the path timing. The filter read the slow drift of the link error as velocity (2 to 4 mm/s, times the monitor's 30 s horizon), and `cam_eval.py` had been running the filter on looser noise levels than the tuned ones. The near-static client failed for a different reason: its straight path passes a corner of the client, so its predicted clearance is set by geometry and lengthening the leg could not raise it.
+
+Three changes:
+1. *Filter.* The slow part of the link position error is carried as three extra states (first-order Gauss-Markov, 60 s); differential gravity is added to the motion model; the tuned noise levels are set. Velocity error in the fly-in at a 60 mm link: 1.0 mm/s rms (was 2.3).
+2. *Fly-in timing* (`fly_lim.py`). The path geometry is unchanged. At each point the speed is the largest one, up to 0.05 m/s, for which a 30 s coast keeps the margin, with a 1.5e-3 m/s² acceleration limit. This replaces the lengthening of minimum-jerk legs.
+3. *Allowance.* With the drift state on, the filter's own position sigma already carries the link error, so the stated link accuracy is no longer added a second time.
+
+| Link (hand-over on) | Grasps | Aborts | Largest push | Monitor's smallest value | Fly-in time, one leg / three legs | Fly-in propellant |
+|---|---|---|---|---|---|---|
+| 60 mm, 1 Hz, P5.4 | 23/25 | 1 | 0.84 mm/s | −0.005 m | 408 / 412 s | 464 mm/s |
+| 60 mm, 1 Hz, P5.4b | 25/25 | 0 | 1.04 mm/s | 0.069 m | 242 / 348 s | 464 mm/s |
+| 20 mm, 5 Hz, P5.4b (first acceleration limit, 4e-4) | 25/25 | 0 | 0.85 mm/s | 0.120 m | 302 / 581 s | 381 mm/s |
+
+No collisions. The 20 mm row was run before the acceleration limit was raised and has not been repeated with the final value.
+
+**P5.5 result (15 Nov, `p5_fault.json`, `p5_fault_nis.json`): the E2 fault set on the servicer's own information.** Chain as P5.4b at the 60 mm link with the hand-over on. One fault per case, at a random time in the fly-in, reach or approach; 25 tune seeds per row.
+
+| Fault | Aborted | Captured | Collisions | Largest push | Detection delay (median / max) | Caught by |
+|---|---|---|---|---|---|---|
+| Thruster stuck open (0.1–0.4 N) | 25 | 0 | 0 | 0.02 mm/s | 0.16 / 0.28 s | thrust residual |
+| Thruster weak (0–30% left) | 13 | 12 | 0 | 0.69 mm/s | 12.8 / 91.7 s | thrust residual |
+| Spin axis wrong by 5–15° | 0 | 25 | 0 | 1.03 mm/s | not needed | the fly-in is re-planned from the estimated axis |
+| Client kick 0.5–2°/s, monitors as in P5.4b | 18 | 6 | **1** | **15.67 mm/s** | 9.6 / 50.8 s | rate jump, tracking error |
+| Client kick, with the new innovation monitor | 25 | 0 | 0 | 0.02 mm/s | 1.2 / 1.7 s | attitude innovation |
+| No fault, with the new innovation monitor | 0 | 25 | 0 | 1.04 mm/s | | no false alarm |
+
+The allowance did not hide the clearance or thruster faults. The kick was the gap: the rate-jump monitor reads the filter's rate, and the filter follows a kick slowly, so kicks during the approach led to one collision and three hard pushes without an abort. The new monitor (`nav_anom`) aborts when the attitude innovation of a link message is more than 60 times its expected square (3 when consistent). Nominal runs reach at most 17; kicks give 98 to 1431.
+
+**P5.5b result (15 Nov, `p5_fault_est.json`): the abort back-off on the estimate.** The frozen run loop builds the abort from the true client state. The step hook now replaces the back-off reference, the thruster-fault re-pointing and the gripper retract direction by ones built from the filter and camera estimates, in the step the abort starts. All four fault rows were repeated with this and with the innovation monitor on: 100 runs, no collisions, 63 aborts, all 63 flown on the estimate and all reaching the safe state within 46 s. The outcomes per fault are the same as in the table above (kick 25 aborts, stuck 25 aborts, weak 13 aborts and 12 captures, wrong axis 25 captures), and the innovation monitor gave no false alarm. The estimate was up to 178 mm and 2.3 mm/s off when an abort started.
+
+Open: kicks below 0.5°/s were not tried; the monitors still read the true state during the 30 s wait at the hold point; the test split has not been run.
+
 Later extensions, simplest first: the same client but silent (state from the servicer's own camera and lidar; the original plan below) → faster spin and nutation → a client with no bar (grab the launch adapter ring).
 
 ## 1. Question and claim

@@ -32,8 +32,13 @@ def _skew(v):
 
 
 class RelFilter:
-    def __init__(self, dt, sig_a=2e-4, sig_w=2e-5, v0_sig=2e-3, w0_sig=np.radians(3.0)):
+    def __init__(self, dt, sig_a=2e-4, sig_w=2e-5, v0_sig=2e-3, w0_sig=np.radians(3.0), bias_frac=0.0, bias_tau=60.0):
+        """bias_frac > 0 (P5.4b): that fraction of the position measurement variance is a slow
+        error (first-order Gauss-Markov, correlation time bias_tau) carried as three more states,
+        z = rho + b + white. Without it the filter reads the drift of the link error as velocity."""
         self.dt, self.sig_a, self.sig_w = dt, sig_a, sig_w
+        self.bias_frac, self.bias_tau = bias_frac, bias_tau
+        self.nx = 9 if bias_frac > 0 else 6
         self.v0_sig, self.w0_sig = v0_sig, w0_sig
         self.ready = False
 
@@ -41,6 +46,15 @@ class RelFilter:
         """First measurement: position and attitude from it; velocity and rate priors."""
         self.x = np.concatenate([rho, np.zeros(3) if v0 is None else v0])  # [rho, rho']
         self.P = np.diag([sp**2] * 3 + [self.v0_sig**2] * 3)
+        if self.nx == 9:  # [rho, rho', b]: the first measurement is rho + b + white
+            sb2 = self.bias_frac * sp**2
+            self.x = np.concatenate([self.x, np.zeros(3)])
+            P = np.zeros((9, 9))
+            P[0:6, 0:6] = self.P
+            P[6:9, 6:9] = sb2 * np.eye(3)
+            P[0:3, 6:9] = P[6:9, 0:3] = -sb2 * np.eye(3)
+            self.P = P
+            self.sb = np.sqrt(sb2)
         self.R = R.copy()
         self.w = np.zeros(3) if w0 is None else w0.copy()
         self.Pa = np.diag([sa**2] * 3 + [self.w0_sig**2] * 3)
@@ -55,10 +69,15 @@ class RelFilter:
     def _advance(self, n):
         """Move the filter state forward over the first n buffered steps."""
         dt = self.dt
-        A = np.eye(6)
+        nx = self.nx
+        A = np.eye(nx)
         A[0:3, 3:6] = dt * np.eye(3)
         q = self.sig_a**2
-        Q = np.zeros((6, 6))
+        Q = np.zeros((nx, nx))
+        if nx == 9:
+            ab = np.exp(-dt / self.bias_tau)
+            A[6:9, 6:9] = ab * np.eye(3)
+            Q[6:9, 6:9] = self.sb**2 * (1 - ab**2) * np.eye(3)
         Q[0:3, 0:3] = q * dt**3 / 3 * np.eye(3)
         Q[0:3, 3:6] = Q[3:6, 0:3] = q * dt**2 / 2 * np.eye(3)
         Q[3:6, 3:6] = q * dt * np.eye(3)
@@ -70,6 +89,8 @@ class RelFilter:
         for a in self.acc[:n]:
             self.x[0:3] += dt * self.x[3:6] + 0.5 * dt**2 * a
             self.x[3:6] += dt * a
+            if nx == 9:
+                self.x[6:9] *= ab
             self.P = A @ self.P @ A.T + Q
             Fa = np.eye(6)
             Fa[0:3, 0:3] += dt * _skew(self.w)
@@ -78,18 +99,26 @@ class RelFilter:
             self.Pa = Fa @ self.Pa @ Fa.T + Qa
         del self.acc[:n]
 
-    def update(self, rho_m, R_m, sp, sa, age_steps):
-        """A measurement taken age_steps control steps ago (1-sigma sp [m], sa [rad])."""
+    def update(self, rho_m, R_m, sp, sa, age_steps, biased=True):
+        """A measurement taken age_steps control steps ago (1-sigma sp [m], sa [rad]).
+        biased=False: a position measurement without the slow error (the servicer's cameras)."""
         n = max(len(self.acc) - age_steps, 0)
         self._advance(n)
-        H = np.zeros((3, 6))
-        H[:, 0:3] = np.eye(3)
-        y = rho_m - self.x[0:3]
-        S = H @ self.P @ H.T + sp**2 * np.eye(3)
-        K = self.P @ H.T @ np.linalg.inv(S)
+        nx = self.nx
+        Hp = np.zeros((3, nx))
+        Hp[:, 0:3] = np.eye(3)
+        r2 = sp**2
+        if nx == 9 and biased:
+            Hp[:, 6:9] = np.eye(3)
+            r2 = (1 - self.bias_frac) * sp**2
+        y = rho_m - Hp @ self.x
+        S = Hp @ self.P @ Hp.T + r2 * np.eye(3)
+        K = self.P @ Hp.T @ np.linalg.inv(S)
         self.nis_p = float(y @ np.linalg.solve(S, y))
         self.x = self.x + K @ y
-        self.P = (np.eye(6) - K @ H) @ self.P
+        self.P = (np.eye(nx) - K @ Hp) @ self.P
+        H = np.zeros((3, 6))
+        H[:, 0:3] = np.eye(3)
         ya = Rotation.from_matrix(R_m @ self.R.T).as_rotvec()
         Sa = H @ self.Pa @ H.T + sa**2 * np.eye(3)
         Ka = self.Pa @ H.T @ np.linalg.inv(Sa)

@@ -77,6 +77,9 @@ class CamSim(FiltSim):
         fe, pe, dt = self.filt_est, self.pose_est, self.cfg.ctrl_dt
         if fe.out is None:
             return
+        if self._ph == "abort":  # backing off: the link is the position source again
+            self._meas_off, fe.z_override = False, None
+            return
         if self._b_frozen:  # jaws closing: the camera estimate is latched and contact changes the
             self._meas_off, fe.z_override = True, None  # dynamics; coast on the thrust model
             return
@@ -146,7 +149,11 @@ def _init(a):
     from cams import CamRig
     for k in range(20):
         try:
-            sim = CamSim(GraspCfg(scene=SCENE, flyin=True, hold_s=5.0, mon=True, mon_act=True))
+            cls = CamSim
+            if a["fly"] == "lim":  # P5.4b: speed limit from the predicted clearance
+                from fly_lim import LimMixin
+                cls = type("CamLimSim", (LimMixin, CamSim), {})
+            sim = cls(GraspCfg(scene=SCENE, flyin=True, hold_s=5.0, mon=True, mon_act=True))
             break
         except ValueError as e:
             if "parse" not in str(e).lower() and "empty" not in str(e).lower():
@@ -154,7 +161,11 @@ def _init(a):
             time.sleep(0.3 + 0.3 * k + 0.05 * (os.getpid() % 10))
     sim.closed, sim.preroll, sim.slow = True, 30.0, a["slow"]
     sim.ekw = dict(tau_b=a["tau_b"], r_ref=1e9)
+    if a["filt"] == "drift":  # P5.4b: tuned noise levels, drift state for the link error, tidal term
+        sim.fkw = dict(sig_a=2e-5, sig_w=5e-6, bias_frac=a["slow"], bias_tau=a["tau_b"])
+        sim.ekw["tide"] = True
     sim.mon_est, sim.cam_fix, sim.fix_rate, sim.k_sig = True, a["cam_fix"], a["fix_rate"], a["k_sig"]
+    sim.nis_abort, sim.abort_est = a["nis_abort"], a["abort"] == "est"
     rig = CamRig(sim.km, mount_m=a["mount_mm"] * 1e-3, mount_deg=a["mount_mm"] / 10.0)
     est = None
     if a["arm"] == "cam":
@@ -164,8 +175,9 @@ def _init(a):
 
 
 def _episode(job):
-    name, cond, seed = job
+    name, cond, seed, fault = job
     sim, rig, est = _W["sim"], _W["rig"], _W["est"]
+    sim.cfg.fault_kind = fault  # P5.5: one injected E2 fault (safety.FaultCfg kinds), "" for none
     c = case_draws(seed, 0.0)
     rig.randomize(np.random.default_rng(seed + 12345))
     if est is not None:
@@ -178,7 +190,8 @@ def _episode(job):
     r = sim.run(np.random.default_rng(seed), spin_deg_s=c["spin"], spin_axis=c["axis"])
     out = dict(cond=name, seed=seed, spin=c["spin"], axis=c["axis"], wall_s=round(time.time() - t0, 1),
                **{k: r.get(k) for k in KEEP}, **{"pre_" + k: v for k, v in sim.pre_out.items()},
-               allow_max=sim.allow_max, cp_min=sim.cp_min, bar_shift_mm=r.get("bar_shift_mm"), **sim.fx)
+               allow_max=sim.allow_max, cp_min=sim.cp_min, bar_shift_mm=r.get("bar_shift_mm"), **sim.fx,
+               fault=fault, nis_a_max=sim.nis_a_max, **{"abort_" + k: v for k, v in sim.abort_info.items()}, **{k: r.get(k) for k in ("t_fault", "fault_phase", "fault_mag", "t_detect", "t_abort", "safe_reached", "t_to_safe", "hit_first")})
     for g, m in sim.m.items():
         n = max(m["n"], 1)
         out.update({f"{g}_err_rms_mm": 1000 * np.sqrt(m["e2"] / n), f"{g}_err_max_mm": 1000 * m["emax"],
@@ -207,15 +220,23 @@ def main():
     ap.add_argument("--fix-rate", type=float, default=0.003, help="slew of the correction [m/s]")
     ap.add_argument("--k-sig", type=float, default=2.0, help="clearance allowance in sigmas (the monitor already has a 0.30 m margin)")
     ap.add_argument("--arm", choices=("cam", "truth"), default="cam")
+    ap.add_argument("--fly", choices=("lim", "legs"), default="lim", help="fly-in timing: speed limit, or lengthened legs (P5.4)")
+    ap.add_argument("--filt", choices=("drift", "plain"), default="drift",
+                    help="drift: link-drift state, tidal term, tuned noise; plain: the P5.4 filter (RelFilter defaults)")
     ap.add_argument("--mount-mm", type=float, default=10.0)
     ap.add_argument("--slow", type=float, default=0.9)
     ap.add_argument("--tau-b", type=float, default=60.0)
     ap.add_argument("--ckpt", default="/home/shrey31/p4_data/pose_v3/best.pt")
     ap.add_argument("--palm-ckpt", default="/home/shrey31/p4_data/palm_net_v2/best.pt")
+    ap.add_argument("--nis-abort", type=float, default=60.0, help="P5.5: abort when the attitude innovation (NIS) exceeds this; 0 = record only")
+    ap.add_argument("--abort", choices=("est", "truth"), default="est", help="P5.5b: client state used by the abort back-off")
+    ap.add_argument("--faults", nargs="*", default=[""], help="P5.5: client_kick thruster_weak thruster_stuck spin_axis_err")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     conds = [(s.split(":")[0], tuple(float(x) for x in s.split(":")[1].split(","))) for s in a.conds]
-    jobs = [(name, cond, TUNE + a.start + i) for name, cond in conds for i in range(a.n)]
+    conds = [(name + ("+" + f if f else ""), cond, f) for name, cond in conds for f in a.faults]
+    jobs = [(name, cond, TUNE + a.start + i, f) for name, cond, f in conds for i in range(a.n)]
+    conds = [(name, cond) for name, cond, _ in conds]
     cfg = {k: v for k, v in vars(a).items() if k not in ("conds", "out")}
     t0 = time.time()
     rows = []
@@ -243,7 +264,25 @@ def main():
         for k in ("link_err_close_mm", "used_err_close_mm", "bus_off_close_mm", "settle_s", "est_close_mm"):
             if k in s:
                 print(f"  {k:20s} median {s[k]['median']:.1f} max {s[k]['max']:.1f}")
+        s["nis_a_max"] = sorted(round(r["nis_a_max"], 1) for r in rs)
+        print(f"  attitude NIS, largest per run: median {s['nis_a_max'][len(rs) // 2]} max {s['nis_a_max'][-1]}")
         print(f"  failed: {s['failed']}")
+        if rs and rs[0].get("fault"):
+            from collections import Counter
+            isn = lambda x: x is None or x != x  # noqa: E731
+            fired = [r for r in rs if not isn(r.get("t_fault"))]
+            det = [r for r in fired if r["aborted"]]
+            lat = sorted(r["t_detect"] - r["t_fault"] for r in det if not isn(r.get("t_detect")))
+            s["fault"] = dict(fired=len(fired), aborted=len(det), by_reason=dict(Counter(r["abort_reason"] for r in det)),
+                              by_phase=dict(Counter(r["fault_phase"] for r in fired)),
+                              abort_on_est=sum(bool(r.get("abort_on_est")) for r in det),
+                              est_err_at_abort_mm_max=max([r["abort_est_err_mm"] for r in det if r.get("abort_est_err_mm") is not None], default=None),
+                              safe_reached=sum(bool(r.get("safe_reached")) for r in det),
+                              t_to_safe_max=max([r["t_to_safe"] for r in det if not isn(r.get("t_to_safe"))], default=None),
+                              latency_s=dict(median=lat[len(lat) // 2], max=lat[-1]) if lat else None,
+                              fired_not_aborted=[(r["seed"], r["outcome"], r["fault_phase"], round(r["fault_mag"], 2),
+                                                  round(1e3 * r["push_dv"], 2)) for r in fired if not r["aborted"]])
+            print(f"  fault: {s['fault']}")
     Path(a.out).write_text(json.dumps(dict(cfg=cfg, scene=SCENE, summary=summ, episodes=rows), indent=1, default=float))
     print("wrote", a.out)
 
