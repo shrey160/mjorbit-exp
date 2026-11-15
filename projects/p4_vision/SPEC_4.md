@@ -325,6 +325,18 @@ No collisions or aborts in any row: the grasp still closes on the bar, but off-c
 - **Target met** (at least 24/25 at ±10 mm, 1°). At ±10 mm over both seed sets: 32/50 without the palm correction, 50/50 with it.
 - **Limits:** rotation and the position along the bar still come from v3; spin ≤ 2°/s; the arm's own kinematics are taken as calibrated; validation seeds only (the test split is unused).
 
+**Robustness and test (15 Nov, `run_palm_robust.sh`; ±10 mm, 1° mounts, 25 cases per row, palm v2 gated, rotation from v3):**
+
+| Cases | v3 alone | v3 + gated palm v2 | Largest push with palm |
+|---|---|---|---|
+| Validation 6000100–124, held-out sun directions | 17/25 | 25/25 | 0.88 mm/s |
+| **Test 7000000–24 (run once)** | 10/25 (95% interval 23–59%) | **25/25 (87–100%)** | 1.33 mm/s |
+
+- No collisions and no aborts in any row. v3 alone captures 24 of 25 each time; its failures are pushes over the 2 mm/s limit (7 and 14 cases).
+- **By spin rate,** over the four ±10 mm runs (validation, fresh validation, held-out sun, test; 100 runs on 75 distinct cases): palm 26/26, 22/22, 16/16 and 36/36 in the bins 0–0.5, 0.5–1, 1–1.5 and 1.5–2°/s; v3 alone 17/26, 12/22, 11/16 and 19/36. No trend with spin in either.
+- The test split is now used for this configuration: no more tuning of the palm network or its gate on seeds 7000000–24.
+- Still open: palm rotation (needs data with larger tilts); the arm's kinematics are taken as calibrated.
+
 **Open choices (user):**
 - What next: the full demo (30 m start, capture, align, release, retreat), palm rotation, or the test split.
 - (Earlier) How far to take the palm network (trace the hard pushes, more data, larger tilts, a bar-in-view output). The user chose reinforcement learning as the training method (13 Nov) for the spin-rate task; whether it is still the right method depends on the task (task 1 could be plain supervised learning of the jaw-to-bar offset from the wrist image).

@@ -239,12 +239,12 @@ story = []
 story += [P("mjorbit: mission and system design guide", "h1"),
           P("A servicer satellite that flies up to a client satellite, grasps its grapple bar with a robot arm, "
             "moves it and lets it go, all in simulation. This guide replaces the P4.4 guide of 13 Nov 2026. "
-            "It describes the mission, the system, what has been measured, and what is still open. 14 Nov 2026.", "sub")]
+            "It describes the mission, the system, what has been measured, and what is still open. 15 Nov 2026.", "sub")]
 
 story += [P("1. What changed since the last guide", "h2"),
           P("The last guide ended with a plan to retrain the ACT imitation policy. That plan was dropped. "
             "The table lists each change and the measurement behind it."),
-          table([["Topic", "Last guide (13 Nov)", "Now (14 Nov)"],
+          table([["Topic", "Last guide (13 Nov)", "Now (15 Nov)"],
                  ["Learned grasp policy (ACT)", "Fails in closed loop; retrain with a time input, then DAgger.",
                   "<b>Dropped.</b> Two more checks scored 0 of 25, one with a collision. The expert follows a clock, "
                   "so its labels never show how to correct an error."],
@@ -259,7 +259,8 @@ story += [P("1. What changed since the last guide", "h2"),
                   "<b>Full demo</b> from 30 m: approach, camera-guided grasp, move, release, retreat."],
                  ["Client state for the servicer body", "Simulator truth, not discussed.",
                   "<b>Project 5.</b> The client reports its own state (cooperative client); a filter and re-tuned "
-                  "monitors handle its errors, delay and gaps. In progress."]], [0.2, 0.33, 0.47]),
+                  "monitors handle its errors, delay and gaps. <b>Working on 25 tune cases:</b> 25 of 25 grasps with "
+                  "a realistic link, and all injected faults end safely (section 5)."]], [0.2, 0.33, 0.47]),
           Spacer(1, 4)]
 
 story += [P("2. Mission design", "h2"),
@@ -319,17 +320,22 @@ story += [P("2. Mission design", "h2"),
                   "stowed, jaws open, not closing).", "Project 3, step E2"],
                  ["Move accuracy", "0.2 m, 2 mm/s, 0.5°, 0.01°/s of the command.", "Project 3"],
                  ["Client spin", "0 to 2°/s, any axis.", "Thrust limit near 2.6°/s"],
-                 ["Provided client state (Project 5)", "About 10 mm, 0.5°, 1 mm/s, smooth spin rate within 0.01°/s, "
-                  "delay up to 0.3 s.", "Measured 14 Nov (section 5)"]], [0.25, 0.53, 0.22]),
+                 ["Provided client state (Project 5)", "Position within 60 mm per axis, attitude within 0.05°, "
+                  "one message per second, up to 0.3 s late. The arm cameras take over the position near the bar.",
+                  "Measured 14 to 15 Nov (section 5)"]], [0.25, 0.53, 0.22]),
           Spacer(1, 4),
           P("2.5 Safety design", "h3"),
           P("Monitors run every control step (100 Hz) from the hold to the capture. Any trip starts the same abort, "
             "chosen so it does not depend on the client moving as expected."),
           table([["Monitor", "Trips when"],
-                 ["Predicted clearance", "The bus, coasting from now for 30 s, would come within 0.3 m of the turning client."],
+                 ["Predicted clearance", "The bus, coasting from now for 30 s, would come within 0.3 m of the turning client. "
+                  "In Project 5 an allowance for the estimate's uncertainty is taken off first."],
                  ["Tracking", "The bus is more than 0.25 m or 8° from its reference near the client."],
                  ["Rate anomaly", "The client's rotation rate jumps by more than 0.1°/s within 2 s (it was kicked)."],
                  ["Thruster check", "Measured acceleration disagrees with commanded thrust by more than 0.04 N."],
+                 ["Stale link (Project 5)", "The newest client message is more than 3 s old."],
+                 ["Navigation anomaly (Project 5)", "A client attitude message disagrees with the filter's prediction "
+                  "far beyond its noise. This catches a kicked client within two messages."],
                  ["Contact", "Anything other than a pad touches the client."],
                  ["Grip slip", "After capture: the bar shifts 6 mm, slips at 3 mm/s, or a pad lifts for 0.2 s. "
                   "Response: re-clamp."]], [0.22, 0.78]),
@@ -356,11 +362,12 @@ story += [P("3. System design", "h2"),
             "purpose of Project 5 and the items after it."),
           table([["Function", "Reads today", "Planned"],
                  ["Far approach", "Simulated relative navigation with noise, through a filter", "No change"],
-                 ["Choice of hold point (spin axis)", "Simulator truth", "Client's reported spin (Project 5)"],
-                 ["Fly-in and station keeping", "Simulator truth", "Provided state through the filter (Project 5, "
-                  "working on 25 tune cases)"],
-                 ["Clearance, tracking and rate monitors", "Simulator truth", "Filter output, with thresholds re-tuned "
-                  "(Project 5, next step)"],
+                 ["Choice of hold point (spin axis)", "Simulator truth", "Client's reported spin"],
+                 ["Fly-in and station keeping", "Client's link through the filter; arm cameras for position near "
+                  "the bar (Project 5)", "Silent client: own camera and lidar"],
+                 ["Clearance, tracking and rate monitors", "Filter output with an allowance; simulator truth only "
+                  "during the 30 s wait at the hold point", "Filter output throughout"],
+                 ["Abort back-off", "Filter output (Project 5)", "No change"],
                  ["Arm reach", "Coarse network on bus camera, lidar and wrist camera", "No change"],
                  ["Arm approach and close", "Palm camera network, checked against the coarse network", "No change"],
                  ["After capture", "Own gyro and accelerometer with noise; identified mass properties", "No change"],
@@ -374,7 +381,8 @@ story += [P("3. System design", "h2"),
                   "work hooks in from outside."],
                  ["projects/p4_vision/", "Cameras and scene, pose networks, palm camera, evaluation runs, the dropped "
                   "ACT pipeline."],
-                 ["projects/p5_own_eyes/", "Tolerance sweeps, relative-motion filter, the Project 5 spec."],
+                 ["projects/p5_own_eyes/", "Tolerance sweeps, relative-motion filter, link model, fly-in speed limit, "
+                  "fault runs, the Project 5 spec."],
                  ["learning/", "This guide, research notes with sources, lessons learned."],
                  ["CONTEXT.md", "The running log. Every session starts by reading its first section."]], [0.27, 0.73]),
           Spacer(1, 4)]
@@ -416,6 +424,9 @@ story += [P("4. Where learning helped, and where it did not", "h2"),
                    "and twice the data took the result from 22 to 25 of 25.",
                    "<b>Result:</b> 25 of 25 at ±1, ±5 and ±10 mm; on 25 fresh cases at ±10 mm, 25 of 25 against "
                    "16 of 25. No collisions, no aborts.",
+                   "<b>Test cases (run once, 15 Nov):</b> 25 of 25 with the palm camera against 10 of 25 without. "
+                   "With sun directions never seen in training: 25 of 25 against 17 of 25. No trend with spin "
+                   "rate from 0 to 2°/s.",
                    "<b>Not learned:</b> the bar's tilt and its position along its own length still come from the "
                    "coarse network."]),
           Spacer(1, 2)]
@@ -473,13 +484,58 @@ else:
                       "on the filter and the fly-in planned from the estimated spin axis (within 2.9° median, 7.5° "
                       "worst). Filter error before contact: 8.6 mm, 0.36 mm/s, 0.31°, 0.008°/s. The 25-case run was "
                       "still in progress when this guide was built.", S2)]
-story += [P("5.2 Next in Project 5", "h3"),
-          bullets(["Monitors on the filter output, with an allowance for its uncertainty, and a new monitor that "
-                   "aborts when the client's data stops arriving.",
-                   "A model of the provided state: its accuracy, update rate, delay and dropouts. The figures need "
-                   "checking against sources.",
-                   "The full fly-in and grasp with no simulator truth in the bus, then the fault cases, then one run "
-                   "on the untouched test cases."])]
+story += [P("5.2 Monitors on the estimate", "h3"),
+          bullets(["<b>Why fly-ins were aborting:</b> the planned path left the clearance monitor only 3 cm of margin, "
+                   "so 3 cm of tracking error tripped it. None of the traced aborts was a real small clearance.",
+                   "<b>Change:</b> the monitors read the filter. The predicted clearance loses an allowance of two "
+                   "standard deviations of the estimate, and the path is planned to keep that allowance plus 8 cm.",
+                   "<b>New monitor:</b> abort when the newest client message is older than 3 s. A 1 s gap is "
+                   "ridden through; a 6 s gap gives a safe abort."]),
+          P("5.3 What a cooperative client can report", "h3"),
+          P("From flown missions: relative satellite navigation gives about 10 cm in three dimensions on board, which "
+            "is 60 mm per axis and drifts slowly; 20 mm is a good case. A star tracker gives 0.05°. Messages arrive "
+            "at 1 to 5 per second. With the arm on the true bar pose, a 20 mm link gave 25 of 25 and a 60 mm link 23 "
+            "of 25: position is the limit, not attitude, message rate or delay."),
+          P("5.4 The whole chain on the servicer's own information", "h3"),
+          P("Bus and monitors on the link filter, arm on the two camera networks with ±10 mm mount error. "
+            "25 tune cases per row."),
+          table([["Link", "Design", "Grasps", "Largest push on client", "Fly-in time, one leg / three legs"],
+                 ["60 mm, 1 Hz", "link only", "20/25", "7.70 mm/s", "408 / 412 s"],
+                 ["60 mm, 1 Hz", "+ hand-over to the arm cameras", "23/25", "0.84 mm/s", "408 / 412 s"],
+                 ["60 mm, 1 Hz", "+ drift filter and speed-limit fly-in", "25/25", "1.04 mm/s", "242 / 348 s"]],
+                [0.14, 0.34, 0.12, 0.2, 0.2]),
+          Spacer(1, 6),
+          bullets(["<b>Hand-over:</b> two seconds after the arm cameras see the bar, they replace the link as the "
+                   "filter's position source. The bus moves over slowly and waits (74 s median) before the arm "
+                   "reaches. This removed every failure at the grasp.",
+                   "<b>Drift filter:</b> the link error wanders over about a minute, and the first filter read that "
+                   "as velocity (2 to 4 mm/s). Carrying the drift as extra states cut the fly-in velocity error to "
+                   "1 mm/s.",
+                   "<b>Speed limit:</b> at each point of the fly-in the speed is the largest one for which a 30 s "
+                   "coast keeps the clearance margin. It replaced stretching the whole path and made the fly-in "
+                   "shorter."]),
+          P("5.5 Faults", "h3"),
+          P("One fault per case at a random time in the fly-in, reach or approach. 25 tune cases per row, 60 mm link, "
+            "aborts flown on the estimate."),
+          table([["Fault", "Aborted", "Captured", "Collisions", "Detection delay (median / max)"],
+                 ["Thruster stuck open (0.1 to 0.4 N)", "25", "0", "0", "0.16 / 0.28 s"],
+                 ["Thruster weak (0 to 30% left)", "13", "12", "0", "12.8 / 91.7 s"],
+                 ["Spin axis wrong by 5 to 15°", "0", "25", "0", "not needed"],
+                 ["Client kicked 0.5 to 2°/s, first monitors", "18", "6", "1", "9.6 / 50.8 s"],
+                 ["Client kicked, with the navigation-anomaly monitor", "25", "0", "0", "1.2 / 1.7 s"]],
+                [0.42, 0.12, 0.12, 0.12, 0.22]),
+          Spacer(1, 6),
+          bullets(["<b>The kick was a real gap.</b> The rate monitor reads the filter, and the filter follows a kick "
+                   "slowly. Kicks during the approach gave one collision and pushes up to 15.7 mm/s with no abort.",
+                   "<b>Fix:</b> abort when an attitude message disagrees with the filter's prediction by more than "
+                   "60 times its expected square. Fault-free runs reach 17 at most; kicks give 98 to 1431.",
+                   "<b>All 63 aborts reached the safe state</b> within 46 s, steering on the estimate, which was up "
+                   "to 178 mm off when the abort began."]),
+          P("5.6 Still open in Project 5", "h3"),
+          bullets(["All of this is on tune cases. The untouched test cases have not been run.",
+                   "Kicks weaker than 0.5°/s were not tried.",
+                   "The monitors still read the true state during the 30 s wait at the hold point.",
+                   "The link delay (0.3 s) is an assumption, not a sourced figure."])]
 
 story += [P("6. Evidence table", "h2"),
           P("What has been run, on how many cases, and what it does not show."),
@@ -489,12 +545,15 @@ story += [P("6. Evidence table", "h2"),
                   "Realistic arm: 25 missions only (24 success, 1 safe abort)."],
                  ["Grasp from cameras equals grasp from true pose", "25/25 both, realistic arm, validation cases.",
                   "Test cases not run for the realistic arm."],
-                 ["Palm camera removes the calibration sensitivity", "25/25 at ±10 mm on 25 fresh validation cases, "
-                  "16/25 without.", "Test cases; unseen sun direction; result by spin rate."],
+                 ["Palm camera removes the calibration sensitivity", "±10 mm mounts: 25/25 on 25 test cases (10/25 "
+                  "without), 25/25 with unseen sun directions (17/25 without); 75 distinct cases in all, no trend "
+                  "with spin.", "Bar tilt from the palm camera; arm calibration error."],
                  ["Full mission from 30 m with release", "One mission, shown in the replay page. Release pushed the "
                   "client 0.013 mm/s.", "A batch; a wheel model during release."],
-                 ["Bus can fly on a filtered, imperfect client state", "25 tune cases per input-error level: 25/25, 24/25 and 19/25 at 5, 10 and 20 mm.",
-                  "Monitors on the estimate; realistic link model; faults."]], [0.27, 0.42, 0.31]),
+                 ["Fly-in and grasp with no simulator truth in the bus or arm", "25 tune cases, 60 mm link, camera "
+                  "hand-over: 25/25, no aborts, no collisions.", "Test cases; the 30 s wait at the hold point."],
+                 ["Faults end safely on the estimate", "100 faulted tune cases: 0 collisions, 63 aborts, all reaching "
+                  "the safe state.", "Test cases; kicks below 0.5°/s."]], [0.27, 0.42, 0.31]),
           Spacer(1, 4)]
 
 story += [P("7. Limits and roadmap", "h2"),
@@ -506,8 +565,9 @@ story += [P("7. Limits and roadmap", "h2"),
           P("Order of work", "h3"),
           table([["Step", "What", "Status"],
                  ["1", "Project 5 for a cooperative client: filter, monitors, link model, closed loop, faults, test",
-                  "Filter built; the rest open"],
-                 ["2", "Make the palm result solid: test cases once, unseen sun, by spin rate, bar tilt", "Open"],
+                  "Done on tune cases; test cases open"],
+                 ["2", "Make the palm result solid: test cases once, unseen sun, by spin rate, bar tilt",
+                  "Done except bar tilt"],
                  ["3", "Release on a batch of missions with a wheel model", "Open"],
                  ["4", "Silent client: the servicer's own cameras see the whole client", "Planned (old Project 5 plan)"],
                  ["5", "Faster spin; force and contact sensing; learning for gentler contact", "Later"]],
@@ -517,8 +577,8 @@ story += [P("7. Limits and roadmap", "h2"),
 story += [P("8. How you can help", "h2"),
           bullets(["<b>Watch the replay page</b> and note anything that looks wrong; the paused-orbit bug was found "
                    "that way.",
-                   "<b>Check the link-model figures</b> in SPEC_5 section 0 against a source you trust (star tracker "
-                   "and differential navigation accuracy, crosslink delay).",
+                   "<b>Check the link delay.</b> The accuracy figures now have sources (RESEARCH_SERVICING.md, "
+                   "section Provided state); the 0.3 s delay is still an assumption.",
                    "<b>Read SPEC_5</b> and question the requirements table: is 2 mm/s push the right limit for a 300 kg "
                    "client?",
                    "<b>Keep the rules:</b> one simulation run at a time, about 25 cases per run, no long GPU jobs on "
@@ -526,8 +586,9 @@ story += [P("8. How you can help", "h2"),
           P("Commands (PowerShell; each call runs inside WSL)", "h3"),
           Paragraph("wsl -d Ubuntu -- bash /mnt/c/Shrey_Projs/robotics/mjorbit/projects/p5_own_eyes/run_p5.sh "
                     "noise_tol.py --conds base:0,0,0,0,0 --n 25 --workers 8 --out &lt;file.json&gt;<br/>"
-                    "wsl -d Ubuntu -- bash .../p5_own_eyes/run_p5.sh filt_eval.py --loop closed --conds m10:10,0.5 "
-                    "--n 25 --workers 8 --out &lt;file.json&gt;<br/>"
+                    "wsl -d Ubuntu -- bash .../p5_own_eyes/run_p5cam.sh cam_eval.py --conds nom:60,0.05,1,0.3 --cam-fix "
+                    "--n 25 --workers 8 --out &lt;absolute path&gt;.json<br/>"
+                    "(add --faults client_kick thruster_stuck for fault cases)<br/>"
                     "wsl -d Ubuntu -- bash .../p4_vision/run_palm_build.sh eval 10 25 --palm-no-rot<br/>"
                     "python learning/make_guide.py C:/Shrey_Projs/robotics/mjorbit", st["code"])]
 
@@ -547,6 +608,9 @@ story += [P("9. Glossary", "h2"),
                   "the camera between the jaws."],
                  ["Gate", "A check that two estimates agree before the finer one is used."],
                  ["Filter", "An algorithm that blends late, noisy measurements with a motion model into a smooth estimate."],
+                 ["Allowance", "Margin taken off a monitor's value to cover the uncertainty of the estimate it reads."],
+                 ["Hand-over", "Switching the filter's position source from the client's link to the arm cameras."],
+                 ["Innovation", "The difference between a new measurement and what the filter predicted."],
                  ["Monitor / abort", "A safety check that runs every step / the fixed safe response when one trips."],
                  ["Tune, validation, test cases", "Random seeds for adjusting settings / for decisions / used once at the end."],
                  ["Δv", "Total velocity change from thrust; a measure of propellant used."],
@@ -558,7 +622,7 @@ def on_page(c, doc):
     c.saveState()
     c.setFont("Arial", 7.5)
     c.setFillColor(MUTED)
-    c.drawString(20 * mm, 10 * mm, "mjorbit mission and system design guide, 14 Nov 2026")
+    c.drawString(20 * mm, 10 * mm, "mjorbit mission and system design guide, 15 Nov 2026")
     c.drawRightString(A4[0] - 20 * mm, 10 * mm, str(doc.page))
     c.restoreState()
 

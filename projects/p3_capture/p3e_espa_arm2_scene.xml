@@ -56,7 +56,7 @@
            use_gravity_gradient="false"/>
 
   <custom>
-    <numeric name="servicer_stow" data="0 -1.5708 3.05 0.09 0 0"/>
+    <numeric name="servicer_stow" data="0 -1.31 2.78 0.5 0 -1.5708"/>  <!-- 15 Nov: was 0 -1.5708 3.05 0.09 0 0, which put the wrist and gripper through the upper arm (54 mm), arm base and bus face; this pose clears all by 25 mm, same bounding radius (p4_vision/dbg_stow.py) -->
     <numeric name="servicer_ready" data="0 -0.8 1.2 -0.4 0 0"/>
     <numeric name="grip_open" data="0.06 -0.06"/>
     <numeric name="grip_squeeze" data="0.03"/>
