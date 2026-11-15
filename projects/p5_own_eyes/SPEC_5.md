@@ -104,7 +104,19 @@ The allowance did not hide the clearance or thruster faults. The kick was the ga
 
 **P5.5b result (15 Nov, `p5_fault_est.json`): the abort back-off on the estimate.** The frozen run loop builds the abort from the true client state. The step hook now replaces the back-off reference, the thruster-fault re-pointing and the gripper retract direction by ones built from the filter and camera estimates, in the step the abort starts. All four fault rows were repeated with this and with the innovation monitor on: 100 runs, no collisions, 63 aborts, all 63 flown on the estimate and all reaching the safe state within 46 s. The outcomes per fault are the same as in the table above (kick 25 aborts, stuck 25 aborts, weak 13 aborts and 12 captures, wrong axis 25 captures), and the innovation monitor gave no false alarm. The estimate was up to 178 mm and 2.3 mm/s off when an abort started.
 
-Open: kicks below 0.5°/s were not tried; the monitors still read the true state during the 30 s wait at the hold point; the test split has not been run.
+**P5.6 result (15 Nov, `p5_test_nom.json`, `p5_test_fault.json`, `run_p5_test.sh`): test split, run once, settings frozen.** Chain as P5.5b (60 mm link, hand-over on, innovation monitor at 60, abort on the estimate), test seeds 7,000,000–024. No tuning on these seeds afterwards.
+
+| Case | Captured | Aborted (safe) | Collisions | Largest push | Detection delay (median / max) | Tune seeds |
+|---|---|---|---|---|---|---|
+| No fault | 25 | 0 | 0 | 0.83 mm/s | | 25 / 0 |
+| Thruster stuck | 0 | 25 | 0 | 0.04 mm/s | 0.18 / 0.34 s | 0 / 25 |
+| Thruster weak | 12 | 13 | 0 | 0.83 mm/s | 9.2 / 69.1 s | 12 / 13 |
+| Spin axis wrong | 25 | 0 | 0 | 0.83 mm/s | not needed | 25 / 0 |
+| Client kick | 0 | 25 | 0 | 0.06 mm/s | 1.15 / 1.66 s | 0 / 25 |
+
+125 runs, 0 collisions; all 63 aborts flown on the estimate (up to 125 mm off) and all reached the safe state within 43 s. Monitor minimum 0.091 m (tune 0.070 m); the largest attitude innovation in a fault-free run was 21.9 (tune 17.4, threshold 60), so the margin to a false alarm held. Bus off station at the close command 31.6 / 73.5 mm (median / max). The tune-seed results carry over to the held-out seeds.
+
+Open: kicks below 0.5°/s were not tried; the monitors still read the true state during the 30 s wait at the hold point.
 
 Later extensions, simplest first: the same client but silent (state from the servicer's own camera and lidar; the original plan below) → faster spin and nutation → a client with no bar (grab the launch adapter ring).
 
